@@ -85,6 +85,46 @@ When the `memex` binary is missing, crashes, returns invalid JSON, or exceeds it
 - **AND** `prefetch` returns `""`
 - **AND** a timeout-warning log line is emitted
 
+### Requirement: Python layer never re-implements engine functionality
+
+The Python package `memex_hermes` SHALL NOT contain its own implementations of embedding, indexing, cache management, telemetry, sync, or any other functionality owned by `@jim80net/memex-core`. All such operations SHALL route through subprocess invocations of the `memex` binary. Helper modules (envelope construction, path resolution, schema dicts) are permitted; engine logic is not. (Per G1 from the openspec systems-review.)
+
+#### Scenario: Python source contains no embedding imports
+- **WHEN** the package source under `memex_hermes/` is scanned for imports of `transformers`, `onnxruntime`, `sentence_transformers`, or any vector-math library used for embedding
+- **THEN** no such imports are found
+- **AND** test fixtures under `test/` and the verification spike under `spike/` are excluded from this scan
+
+#### Scenario: Python source contains no direct git invocation
+- **WHEN** the package source under `memex_hermes/` is scanned for subprocess calls whose argv starts with `git`
+- **THEN** none are found
+- **AND** the only subprocess invocations are of the `memex` binary itself
+
+### Requirement: Lifecycle methods dispatch to the correct engine events
+
+Each Hermes-invoked provider lifecycle method SHALL dispatch to the corresponding `Hermes.*` event when it invokes the binary: `initialize`→`Hermes.init`, `system_prompt_block`→`Hermes.system-prompt`, `prefetch`→`Hermes.prefetch`, `queue_prefetch`→`Hermes.queue-prefetch`, `sync_turn`→`Hermes.sync-turn`, `on_session_end`→`Hermes.session-end`, `on_pre_compress`→`Hermes.pre-compress`, `on_memory_write`→`Hermes.memory-write`, `shutdown`→`Hermes.shutdown`, `is_available`→`Hermes.health`, `handle_tool_call("memex_search", ...)`→`Hermes.tool-search`, `handle_tool_call("memex_remember", ...)`→`Hermes.tool-remember`, `handle_tool_call("memex_recall", ...)`→`Hermes.tool-recall`. `name`, `get_tool_schemas`, `get_config_schema`, and `save_config` do not invoke the binary. (Per G3 from the openspec systems-review.)
+
+#### Scenario: Each provider method invokes the documented event
+- **GIVEN** the runner is replaced with a stub that records every `hook_event_name` it receives
+- **WHEN** each listed method is invoked once with representative arguments
+- **THEN** the recorded `hook_event_name` per call matches the documented mapping
+- **AND** `name`, `get_tool_schemas`, `get_config_schema`, `save_config` produce no recorded entries
+
+### Requirement: shutdown drains in-flight write operations within bound
+
+`shutdown()` SHALL wait for in-flight daemon-thread write operations (`sync_turn`, `on_memory_write`, `queue_prefetch`) to complete, bounded by 5 seconds. Operations still pending after the bound SHALL be canceled and a warning emitted via the Hermes logger. (Per G3 from the openspec systems-review.)
+
+#### Scenario: shutdown waits for a pending mirror write
+- **GIVEN** an `on_memory_write` daemon-thread invocation is in flight and configured to take 200 ms to complete
+- **WHEN** `provider.shutdown()` is called immediately after dispatching the write
+- **THEN** `shutdown()` returns only after the write completes
+- **AND** total elapsed time is ≥ 200 ms and ≤ 5 seconds
+
+#### Scenario: shutdown cancels work that exceeds the bound
+- **GIVEN** a daemon-thread invocation is in flight and configured to take 10 seconds
+- **WHEN** `provider.shutdown()` is called
+- **THEN** `shutdown()` returns after approximately 5 seconds
+- **AND** a warning identifying the canceled action is emitted via the Hermes logger
+
 ### Requirement: A pre-implementation verification spike resolves on_memory_write semantics
 
 Before the `MemexProvider` class is implemented, a one-file `MemoryProvider` subclass SHALL be built that traces every callback invocation, and run against Hermes interactively exercising the built-in `remember` tool, a normal turn, a session end, and a compression. The findings (which callbacks fire with which payloads) SHALL be recorded in the design doc and pick the primary mirror path for `on_memory_write` versus the mtime-watcher fallback.
@@ -94,7 +134,4 @@ Before the `MemexProvider` class is implemented, a one-file `MemoryProvider` sub
 - **THEN** `docs/specs/2026-05-25-memex-hermes-adapter-design.md` §8.4 is updated to identify which of the two specced paths is primary
 - **AND** the chosen path is the one implemented first
 
-#### Scenario: Spike re-runs on every Hermes upgrade
-- **WHEN** the Hermes runtime is upgraded to a new minor or major version
-- **THEN** the verification spike is re-run before that version is supported
-- **AND** the design doc is updated if the contract changed
+(Maintenance policy — the spike SHALL be re-run on Hermes major or minor version upgrades; this is captured in `CONTRIBUTING.md` as a process gate rather than a runtime Scenario, per G9 from the openspec systems-review.)

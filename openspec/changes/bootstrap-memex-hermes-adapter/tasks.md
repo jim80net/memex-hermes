@@ -9,7 +9,7 @@
 - [ ] 1.7 Add `LICENSE` (MIT, matching the family), `CONTRIBUTING.md` (dev setup), and `README.md` (user-facing intro mirroring `memex-claude` tone)
 - [ ] 1.8 Add `CLAUDE.md` documenting the project's architecture, conventions, and the dual Python/TypeScript layering for AI dev assistance
 
-## 2. Pre-implementation verification spike (D9 / F7 / F11)
+## 2. Pre-implementation verification spike (D9 / F7 / F11) — **GATES §3-§8**
 
 - [ ] 2.1 Write `spike/trace_provider.py` — a one-file `MemoryProvider` subclass that prints every callback invocation with its name and full argument list
 - [ ] 2.2 Install the spike as a Hermes plugin in a scratch `$HERMES_HOME` and enable it
@@ -17,6 +17,11 @@
 - [ ] 2.4 Capture the exact return-type expectations for `get_tool_schemas()` and `handle_tool_call()` by inspecting `agent/memory_provider.py` (read the Python source if open; otherwise infer from trace output)
 - [ ] 2.5 Update `docs/specs/2026-05-25-memex-hermes-adapter-design.md` §8.4 with the chosen primary path (`on_memory_write` vs mtime-watcher) and any contract refinements
 - [ ] 2.6 If any contract diverges from the v2 design assumptions, file deltas back into the openspec change (update affected `specs/*/spec.md` and re-run systems-review)
+- [ ] 2.7 Commit `spike/SPIKE-COMPLETE.md` summarizing findings and tagging this group as cleared. This file's presence is the gate for §3 onward. (Per G12 from the openspec systems-review.)
+
+## 3. TypeScript engine extension — paths and configuration
+
+**Blocked by: §2. Do not start §3 until `spike/SPIKE-COMPLETE.md` exists.**
 
 ## 3. TypeScript engine extension — paths and configuration
 
@@ -27,17 +32,20 @@
 
 ## 4. TypeScript engine extension — Hermes.* event handlers
 
-- [ ] 4.1 Extend `src/main.ts` `switch (input.hook_event_name)` with `Hermes.health`, `Hermes.init`, `Hermes.shutdown`
+**Blocked by: §2.**
+
+- [ ] 4.1 Extend `src/main.ts` `switch (input.hook_event_name)` with `Hermes.health`, `Hermes.init`, `Hermes.shutdown`, `Hermes.queue-prefetch`, `Hermes.pre-compress`
 - [ ] 4.2 Implement `src/hooks/prefetch.ts` (`Hermes.prefetch`) reusing `memex-claude`'s user-prompt disclosure logic via memex-core APIs
 - [ ] 4.3 Implement `src/hooks/sync-turn.ts` (`Hermes.sync-turn`) with telemetry append + memory mtime tracker
-- [ ] 4.4 Implement `src/hooks/session-end.ts` (`Hermes.session-end`) extracting learnings via the configured model
+- [ ] 4.4 Implement `src/hooks/session-end.ts` (`Hermes.session-end`) extracting learnings via an **explicitly configured** `extractionModel` (with API key/base URL in config). The "use Hermes' active model" fallback path is deferred to v1.x; v1 requires explicit configuration. (Per G17 from the openspec systems-review.)
 - [ ] 4.5 Implement `src/hooks/pre-compress.ts` (`Hermes.pre-compress`)
 - [ ] 4.6 Implement `src/hooks/memory-write.ts` (`Hermes.memory-write`) writing the mirror file and committing
 - [ ] 4.7 Implement `src/hooks/system-prompt.ts` (`Hermes.system-prompt`) returning static session-lifetime content (tool inventory + sync state)
 - [ ] 4.8 Implement `src/hooks/tool.ts` dispatching `Hermes.tool-search`, `Hermes.tool-remember`, `Hermes.tool-recall`
 - [ ] 4.9 Wire all writes (cache, telemetry, sessions, registry, mtime tracker) through `withFileLock()` from memex-core
-- [ ] 4.10 Wire git push retry-with-rebase (`sync.pushRetries`, default 3, exponential backoff 200/400/800 ms)
-- [ ] 4.11 Wire `_session/*` project-ID push suppression (D7)
+- [ ] 4.10 Wire git push retry-with-rebase (`sync.pushRetries`, default 3, exponential backoff 200/400/800 ms). **Implementation lives in this repo's `src/hooks/` wrapping memex-core's existing push primitive; do NOT modify memex-core for v1.** (Per G14.)
+- [ ] 4.11 Wire `_session/*` project-ID push suppression (D7). **Implementation lives in this repo's `src/hooks/sync-turn.ts` (and related call sites); do NOT modify memex-core for v1.** (Per G15.)
+- [ ] 4.12 Implement both mirror paths for MEMORY.md/USER.md edits: the `Hermes.memory-write` handler (callback path) AND the mtime-watcher inside `Hermes.sync-turn` (fallback path). The spike outcome from §2.5 determines which is primary; both ship regardless. (Per G19.)
 
 ## 5. TypeScript engine extension — tests
 
@@ -51,21 +59,28 @@
 
 ## 6. Python plugin — paths and configuration
 
+**Blocked by: §2.**
+
 - [ ] 6.1 Implement `memex_hermes/paths.py` resolving `$HERMES_HOME` from env or `save_config` argument; parsing `config.yaml` for `external_dirs`; refusing to hardcode `~/.hermes/`
 - [ ] 6.2 Implement `memex_hermes/config.py` loading `$HERMES_HOME/memex.json`, merging defaults, producing a JSON Schema for `get_config_schema()`
-- [ ] 6.3 Implement `memex_hermes/runner.py` with two surfaces: `await_subprocess(event_name, payload)` (via `asyncio.to_thread`) and `fire_and_forget(event_name, payload)` (via a daemon thread + bounded queue)
+- [ ] 6.3 Implement `memex_hermes/runner.py` with two surfaces: `await_subprocess(event_name, payload)` (via `asyncio.to_thread`) and `fire_and_forget(event_name, payload)` (via a daemon thread + bounded queue). **Depends on §4 envelope decisions being settled; defer if §4.1 is in flight.** (Per G16.)
 - [ ] 6.4 Implement timeout, exit-code, and JSON-parse error handling that returns safe defaults (empty string for prefetch, False for is_available, error JSON for tool calls)
 
 ## 7. Python plugin — MemexProvider
 
+**Blocked by: §2 (and §6 for runner.py).**
+
 - [ ] 7.1 Implement `memex_hermes/__init__.py` with `register(ctx)` calling `ctx.register_memory_provider(MemexProvider())`
-- [ ] 7.2 Implement `memex_hermes/provider.py` `MemexProvider(MemoryProvider)` with: `name`, `is_available`, `initialize`, `system_prompt_block` (static, cached after first call), `prefetch`, `queue_prefetch`, `sync_turn`, `on_session_end`, `on_pre_compress`, `on_memory_write`, `shutdown`, `get_tool_schemas`, `handle_tool_call`, `get_config_schema`, `save_config`
+- [ ] 7.2a Implement provider **lifecycle**: `name`, `is_available`, `initialize`, `system_prompt_block` (static-cached after first call), `shutdown` (with bounded drain per the `hermes-memory-provider` shutdown Requirement)
+- [ ] 7.2b Implement provider **runtime dispatch**: `prefetch`, `queue_prefetch`, `sync_turn` (non-blocking via daemon thread), `handle_tool_call` (with all three tool routes), `get_tool_schemas`
+- [ ] 7.2c Implement provider **write & end-of-life**: `on_session_end`, `on_pre_compress`, `on_memory_write`, `get_config_schema`, `save_config` (using the `hermes_home` argument, never hardcoded)
 - [ ] 7.3 Implement `memex_hermes/tools.py` with the three tool schemas (`memex_search` / `memex_remember` / `memex_recall`) and their dispatch into `Hermes.tool-*` events
-- [ ] 7.4 Ensure `save_config(values, hermes_home)` writes to `<hermes_home>/memex.json` using the argument, not a hardcoded path
-- [ ] 7.5 Ensure every binary invocation passes `MEMEX_HERMES_HOME` as an env var
-- [ ] 7.6 Ensure no method propagates an exception that would crash the Hermes session
+- [ ] 7.4 Ensure every binary invocation passes `MEMEX_HERMES_HOME` as an env var
+- [ ] 7.5 Ensure no method propagates an exception that would crash the Hermes session
 
 ## 8. Python plugin — tests
+
+**Blocked by: §2.**
 
 - [ ] 8.1 pytest tests for `provider.py` with `runner` mocked to assert correct JSON envelopes per method
 - [ ] 8.2 pytest tests for `paths.py` with tmp `$HERMES_HOME` fixtures (custom dir, malformed yaml, missing config.yaml)
@@ -74,7 +89,10 @@
 - [ ] 8.4 pytest tests for `tools.py` validating tool-schema shape conforms to `name/description/parameters` dict
 - [ ] 8.5 pytest test for non-blocking `sync_turn`: assert calling task suspends for < 5 ms even when the subprocess is mocked to sleep 500 ms
 - [ ] 8.6 pytest test for daemon-thread queue overflow: drop oldest entry and log
-- [ ] 8.7 Type-check passes via `mypy memex_hermes/` (strict mode where feasible)
+- [ ] 8.7 pytest test for `shutdown` drain: pending daemon work completes within 5s bound; over-bound work is canceled with a warning (per the `hermes-memory-provider` shutdown Requirement)
+- [ ] 8.8 pytest test for **method → event dispatch invariant**: parametrized test asserting each provider method invokes the documented `hook_event_name` with a stub runner; methods that should not invoke the binary (`name`, `get_tool_schemas`, `get_config_schema`, `save_config`) produce no recorded calls. (Per G3.)
+- [ ] 8.9 pytest test for **no-Python-engine invariant**: grep-style CI rule asserting `memex_hermes/` (excluding `test/` and `spike/`) contains no imports of `transformers`, `onnxruntime`, `sentence_transformers`, and no subprocess argv starting with `git`. (Per G1.)
+- [ ] 8.10 Type-check passes via `mypy memex_hermes/` (strict mode where feasible)
 
 ## 9. Distribution — binary download and packaging
 
@@ -111,7 +129,7 @@
 ## 13. Documentation
 
 - [ ] 13.1 README.md: explain what memex-hermes is, install paths, quickstart, link to `docs/specs/2026-05-25-memex-hermes-adapter-design.md`
-- [ ] 13.2 CONTRIBUTING.md: explain the dual Python/TypeScript layering and how to run the verification spike
+- [ ] 13.2 CONTRIBUTING.md: explain the dual Python/TypeScript layering and how to run the verification spike. **Include a "Maintenance" section requiring re-run of the spike on Hermes major/minor upgrades and update of `spike/<version>-trace.log`.** (Per G9 from the openspec systems-review — this is process, not a runtime Scenario.)
 - [ ] 13.3 USAGE.md (parallels `memex-claude/USAGE.md`): full config reference, sync setup, bundled skill usage, troubleshooting
 - [ ] 13.4 Update `docs/specs/...design.md` post-spike with verified findings
 

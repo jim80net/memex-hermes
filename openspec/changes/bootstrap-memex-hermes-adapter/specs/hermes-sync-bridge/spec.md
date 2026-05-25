@@ -2,7 +2,7 @@
 
 ### Requirement: Hermes built-in memory writes propagate to the shared sync repo
 
-A write performed by Hermes' built-in `remember` tool (or any other mechanism that modifies `$HERMES_HOME/memories/{MEMORY,USER}.md`) SHALL be mirrored into the local sync repo at `<sync_repo>/projects/<project-id>/memory/<target>.md` and committed. The trigger SHALL be either the `on_memory_write` callback (if the verification spike confirms it fires) OR the mtime-watcher inside `Hermes.sync-turn` (fallback if it does not). Both implementations SHALL exist; one is the primary trigger per spike outcome.
+A write performed by Hermes' built-in `remember` tool (or any other mechanism that modifies `$HERMES_HOME/memories/{MEMORY,USER}.md`) SHALL be mirrored into the local sync repo at `<sync_repo>/projects/<project-id>/memory/<target>.md` and committed. The system SHALL implement BOTH mirror paths — the `on_memory_write` callback handler AND the mtime-watcher inside `Hermes.sync-turn` — regardless of which the verification spike (see `hermes-memory-provider`) selects as primary. The primary path is the one that fires under normal Hermes operation; the secondary acts as a safety net for the cases where the primary is silent (e.g., direct disk edits, out-of-band tools). (Per G19 from the openspec systems-review.)
 
 #### Scenario: MEMORY.md edit reaches the sync repo
 - **GIVEN** `sync.enabled = true` and a non-session project ID

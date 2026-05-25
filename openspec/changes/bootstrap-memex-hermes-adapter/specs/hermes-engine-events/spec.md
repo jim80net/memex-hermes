@@ -76,6 +76,47 @@ When the `sessionEnd.extractLearnings` config is true, `Hermes.session-end` SHAL
 - **THEN** a new memory file is written under the project memory dir
 - **AND** the response is JSON `{"written": "<path>", "synced": true|false}`
 
+### Requirement: Lifecycle and write events return well-formed responses
+
+The binary SHALL implement handlers for `Hermes.health`, `Hermes.init`, `Hermes.shutdown`, `Hermes.queue-prefetch`, `Hermes.pre-compress`, `Hermes.memory-write`, and `Hermes.system-prompt`. Each handler SHALL accept a JSON `HookInput` on stdin and write a JSON object on stdout, never crashing the binary even on malformed or partial input. (Per G2 from the openspec systems-review.)
+
+#### Scenario: Hermes.health returns a ready/not-ready response
+- **WHEN** the binary receives `{"hook_event_name": "Hermes.health"}` on stdin
+- **THEN** the response is `{"ready": true}` if the binary, model cache, and config are reachable
+- **AND** otherwise the response is `{"ready": false, "reason": "<diagnostic>"}`
+
+#### Scenario: Hermes.init records the session
+- **WHEN** the binary receives `{"hook_event_name": "Hermes.init", "session_id": "s1", "cwd": "/repo"}`
+- **THEN** the project registry is updated with `cwd` and a `lastSeen` timestamp
+- **AND** the response is `{}` or `{"ok": true}`
+
+#### Scenario: Hermes.system-prompt returns stable content for a session
+- **WHEN** the binary is invoked twice with the same `session_id` for `Hermes.system-prompt`
+- **THEN** both responses contain identical `block` strings
+
+#### Scenario: Hermes.memory-write writes the mirror and commits
+- **GIVEN** `sync.enabled = true` and a non-session project ID
+- **WHEN** the binary receives `{"hook_event_name": "Hermes.memory-write", "args": {"action": "update", "target": "MEMORY.md", "content": "..."}}`
+- **THEN** `<sync_repo>/projects/<id>/memory/MEMORY.md` matches the supplied content
+- **AND** a git commit exists referencing this change
+- **AND** the response is `{}` or `{"committed": true}`
+
+#### Scenario: Hermes.queue-prefetch warms the embedding model
+- **WHEN** the binary receives `{"hook_event_name": "Hermes.queue-prefetch", "args": {"query": "..."}}`
+- **THEN** the embedding model is loaded into memory if not already
+- **AND** the query embedding is computed and cached for the configured `cacheTimeMs`
+- **AND** the response is `{}` (no content returned)
+
+#### Scenario: Hermes.pre-compress snapshots project memory
+- **WHEN** the binary receives `{"hook_event_name": "Hermes.pre-compress"}` before Hermes compresses session messages
+- **THEN** the current project memory state is snapshotted into the sync repo
+- **AND** the response is `{}`
+
+#### Scenario: Hermes.shutdown flushes telemetry and returns
+- **WHEN** the binary receives `{"hook_event_name": "Hermes.shutdown"}`
+- **THEN** any pending telemetry writes complete (bounded by file-lock semantics)
+- **AND** the response is `{}` within 1 second under normal conditions
+
 ### Requirement: Hermes.* events live in this repo's src/ for v1
 
 The new `Hermes.*` event handlers SHALL live in `memex-hermes/src/` (TypeScript) and call into `@jim80net/memex-core` as a library dependency. They SHALL NOT modify `memex-core` itself for v1. The path layer for Hermes (`src/core/hermes-paths.ts`) similarly lives in this repo for v1 and is upstreamed once stable.
