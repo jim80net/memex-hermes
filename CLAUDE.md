@@ -57,3 +57,16 @@ Tasks §1 (scaffolding) and §2.1 (write `spike/trace_provider.py`) can run imme
 - Never auto-merge PRs (`gh pr merge` is blocked by hook). Wait for explicit user authorization.
 - Never re-implement memex-core in Python. Helpers for envelope construction are fine; engine logic is not.
 - When a Hermes contract is unverified, prefer empirical verification (the spike pattern) over assumption.
+
+## Strict Python typing (mypy --strict)
+
+All Python code under `memex_hermes/` MUST pass `mypy --strict`. Notable rules (full text: `~/.claude/rules/strict-typing-python.md`):
+
+1. Never `dict[]` or bare `dict` — use `TypedDict` (for kwargs/JSON shapes) or Pydantic `BaseModel` (for validated boundary data).
+2. All function signatures fully typed (params + return). All class attributes typed.
+3. Use `Sequence` / `Mapping` / `Collection` from `collections.abc` over concrete `list` / `dict` in parameter types.
+4. `Any` is permitted ONLY when interfacing with untyped third-party APIs (e.g., Hermes' `MemoryProvider` ABC, whose runtime shapes are partially undocumented). Wrap `Any` in a typed adapter as soon as it crosses into our code.
+
+**The `spike/` directory is exempt** from this rule — it is intentionally untyped because its entire purpose is to discover the shapes that the typed code will later use. `spike/trace_provider.py` uses `Any` throughout because the kwargs/payloads it receives ARE what we're trying to characterize.
+
+Once `spike/SPIKE-COMPLETE.md` documents the observed shapes, `memex_hermes/provider.py` MUST encode them as `TypedDict`s (or Pydantic models for inputs that cross the subprocess boundary) and use strict types throughout.

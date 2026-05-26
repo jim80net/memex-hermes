@@ -85,6 +85,20 @@ When the `memex` binary is missing, crashes, returns invalid JSON, or exceeds it
 - **AND** `prefetch` returns `""`
 - **AND** a timeout-warning log line is emitted
 
+### Requirement: All Python code passes mypy --strict
+
+All Python code under `memex_hermes/` SHALL pass `mypy --strict`. The package SHALL NOT use bare `dict` or `dict[k,v]` as parameter or return types in its own code; structured kwarg/JSON shapes SHALL use `TypedDict` and data crossing the subprocess boundary SHALL use Pydantic `BaseModel`. `Any` is permitted only as the input type at Hermes ABC boundaries (whose runtime shapes are partially undocumented), and SHALL be narrowed via a typed adapter as soon as the value enters our code. The `spike/` directory is exempt as research code; this exemption is documented in `CLAUDE.md` and `CONTRIBUTING.md`.
+
+#### Scenario: mypy --strict passes on the package
+- **WHEN** `mypy --strict memex_hermes/` runs
+- **THEN** the exit code is 0
+- **AND** no errors are reported
+
+#### Scenario: Boundary inputs are narrowed before propagating
+- **WHEN** a `MemoryProvider` lifecycle method accepts `Any`-typed input from Hermes
+- **THEN** the value is validated and converted into a `TypedDict` or Pydantic model before being passed to internal helpers or to the binary runner
+- **AND** no internal helper signature accepts `Any` for that value
+
 ### Requirement: Python layer never re-implements engine functionality
 
 The Python package `memex_hermes` SHALL NOT contain its own implementations of embedding, indexing, cache management, telemetry, sync, or any other functionality owned by `@jim80net/memex-core`. All such operations SHALL route through subprocess invocations of the `memex` binary. Helper modules (envelope construction, path resolution, schema dicts) are permitted; engine logic is not. (Per G1 from the openspec systems-review.)

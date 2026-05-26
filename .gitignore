@@ -16,6 +16,9 @@ build/
 # Spike outputs (kept locally; not version-controlled)
 spike/*-trace.log
 
+# Per-session local settings (Claude Code permissions, etc.)
+.claude/settings.local.json
+
 # Editors / OS
 .DS_Store
 *.swp

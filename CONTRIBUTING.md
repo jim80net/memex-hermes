@@ -59,11 +59,25 @@ Implementation work is structured as an OpenSpec change. See [`openspec/changes/
 
 ## Coding conventions
 
-- **Python:** ruff for lint, mypy in strict mode, pytest with asyncio_mode=auto.
+- **Python:** ruff for lint, **mypy in strict mode (enforced — see below)**, pytest with asyncio_mode=auto.
 - **TypeScript:** biome for lint+format, strict tsconfig, vitest for tests.
 - **No silent fallbacks.** Per the family-wide rule, never auto-mock or paper over an environment problem; fix the integrated environment first.
 - **No emojis in source files** unless explicitly requested.
 - **Comments are rare.** Only when the WHY is non-obvious (a workaround, a non-trivial invariant). Don't narrate the WHAT.
+
+### Strict Python typing
+
+All Python code under `memex_hermes/` MUST pass `mypy --strict`:
+
+- **No bare `dict` or `dict[k,v]` as parameter/return types.** Use `TypedDict` for kwargs and JSON shapes; use Pydantic `BaseModel` for validated data that crosses the subprocess boundary (JSON envelopes to/from the binary, config files, tool inputs from the agent).
+- **All function signatures fully typed**: parameters AND return type. No untyped `def`.
+- **All class attributes typed**: use class-level annotations or Pydantic field definitions.
+- **Prefer `collections.abc.{Sequence, Mapping, Collection}`** over concrete `list` / `dict` in input parameter types (covariance matters for the runner/provider boundary).
+- **`Any` is allowed only at the Hermes ABC boundary** — `MemoryProvider`'s actual method signatures are partially undocumented. Where we MUST accept `Any` (e.g., the `**kwargs` to `initialize`, the `messages` to `on_session_end`, the `content` to `on_memory_write`), wrap it in a typed adapter inside the method and propagate typed values from there.
+
+The full rule: `~/.claude/rules/strict-typing-python.md`.
+
+**The `spike/` directory is exempt** — it's research code whose entire purpose is to discover the shapes that the strictly-typed code will later use. `spike/trace_provider.py` deliberately uses `Any` throughout. Once `spike/SPIKE-COMPLETE.md` documents the observed shapes, `memex_hermes/provider.py` encodes them as `TypedDict`s and uses strict types throughout.
 
 ## Pull requests
 

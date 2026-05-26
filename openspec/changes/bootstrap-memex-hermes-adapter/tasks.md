@@ -92,7 +92,7 @@
 - [ ] 8.7 pytest test for `shutdown` drain: pending daemon work completes within 5s bound; over-bound work is canceled with a warning (per the `hermes-memory-provider` shutdown Requirement)
 - [ ] 8.8 pytest test for **method → event dispatch invariant**: parametrized test asserting each provider method invokes the documented `hook_event_name` with a stub runner; methods that should not invoke the binary (`name`, `get_tool_schemas`, `get_config_schema`, `save_config`) produce no recorded calls. (Per G3.)
 - [ ] 8.9 pytest test for **no-Python-engine invariant**: grep-style CI rule asserting `memex_hermes/` (excluding `test/` and `spike/`) contains no imports of `transformers`, `onnxruntime`, `sentence_transformers`, and no subprocess argv starting with `git`. (Per G1.)
-- [ ] 8.10 Type-check passes via `mypy memex_hermes/` (strict mode where feasible)
+- [ ] 8.10 Type-check passes via `mypy --strict memex_hermes/`. Per `~/.claude/rules/strict-typing-python.md`: no bare `dict`; use `TypedDict` for kwargs/JSON shapes and Pydantic `BaseModel` for boundary data; `Any` only at Hermes ABC inputs, narrowed via typed adapter immediately. `spike/` is exempt.
 
 ## 9. Distribution — binary download and packaging
 

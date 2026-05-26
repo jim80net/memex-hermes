@@ -1,6 +1,14 @@
 """
 Pre-implementation verification spike for memex-hermes.
 
+NOTE ON TYPING: This file uses `Any` throughout, which violates the project's
+mypy --strict rule (~/.claude/rules/strict-typing-python.md). The exemption is
+deliberate and documented in CLAUDE.md: the spike's entire purpose is to
+discover the runtime argument shapes of Hermes' MemoryProvider ABC, which the
+public docs leave partially undefined. Once SPIKE-COMPLETE.md captures the
+observed shapes, memex_hermes/provider.py will encode them as TypedDicts and
+use strict types throughout.
+
 Goal: discover which Hermes MemoryProvider callbacks actually fire under
 normal operation, with what argument shapes. The Hermes docs describe the
 ABC's surface in broad strokes but leave several semantics ambiguous —
