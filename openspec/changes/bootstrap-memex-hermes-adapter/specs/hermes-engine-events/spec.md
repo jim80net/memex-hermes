@@ -78,7 +78,7 @@ When the `sessionEnd.extractLearnings` config is true, `Hermes.session-end` SHAL
 
 ### Requirement: Lifecycle and write events return well-formed responses
 
-The binary SHALL implement handlers for `Hermes.health`, `Hermes.init`, `Hermes.shutdown`, `Hermes.queue-prefetch`, `Hermes.pre-compress`, `Hermes.memory-write`, and `Hermes.system-prompt`. Each handler SHALL accept a JSON `HookInput` on stdin and write a JSON object on stdout, never crashing the binary even on malformed or partial input. (Per G2 from the openspec systems-review.)
+The binary SHALL implement handlers for `Hermes.health`, `Hermes.init`, `Hermes.shutdown`, `Hermes.queue-prefetch`, `Hermes.pre-compress`, `Hermes.memory-write`, `Hermes.session-switch`, and `Hermes.system-prompt`. Each handler SHALL accept a JSON `HookInput` on stdin and write a JSON object on stdout, never crashing the binary even on malformed or partial input. (Per G2 from the openspec systems-review; `Hermes.session-switch` added per R4 from `spike/SPIKE-COMPLETE.md`.)
 
 #### Scenario: Hermes.health returns a ready/not-ready response
 - **WHEN** the binary receives `{"hook_event_name": "Hermes.health"}` on stdin
@@ -96,10 +96,16 @@ The binary SHALL implement handlers for `Hermes.health`, `Hermes.init`, `Hermes.
 
 #### Scenario: Hermes.memory-write writes the mirror and commits
 - **GIVEN** `sync.enabled = true` and a non-session project ID
-- **WHEN** the binary receives `{"hook_event_name": "Hermes.memory-write", "args": {"action": "update", "target": "MEMORY.md", "content": "..."}}`
+- **WHEN** the binary receives `{"hook_event_name": "Hermes.memory-write", "args": {"action": "add", "target": "memory", "content": "...", "metadata": {"write_origin": "remember", "session_id": "s1"}}}`
 - **THEN** `<sync_repo>/projects/<id>/memory/MEMORY.md` matches the supplied content
 - **AND** a git commit exists referencing this change
+- **AND** the supplied `metadata` is available to the handler for provenance/suppression decisions (e.g. an `execution_context` other than primary suppresses the write)
 - **AND** the response is `{}` or `{"committed": true}`
+
+#### Scenario: Hermes.session-switch updates the session-scoped state
+- **WHEN** the binary receives `{"hook_event_name": "Hermes.session-switch", "session_id": "s2", "args": {"parent_session_id": "s1", "reset": false}}`
+- **THEN** the project registry / session tracker re-scopes subsequent writes to `s2`
+- **AND** the response is `{}` or `{"ok": true}`
 
 #### Scenario: Hermes.queue-prefetch warms the embedding model
 - **WHEN** the binary receives `{"hook_event_name": "Hermes.queue-prefetch", "args": {"query": "..."}}`

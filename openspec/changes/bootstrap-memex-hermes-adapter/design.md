@@ -102,9 +102,9 @@ This is a greenfield adapter; nothing to migrate. Three external impact points t
 
 1. **`@jim80net/memex-core`**: no changes required for v1. The `Hermes.*` switch cases live in this repo's `src/main.ts`. Once stable, `src/core/hermes-paths.ts` and the `Hermes.*` handlers will be upstreamed into `memex-core` (the same evolution path `memex-claude` took). No breaking changes to core types or APIs.
 2. **GitHub release pipeline**: this repo's CI will pin to specific `memex-core` binary releases and verify their SHA256s. No new artifacts published from `memex-core`; we consume what `memex-claude`'s release pipeline already ships.
-3. **PyPI registration**: `memex-hermes` is a new package name; reserve it before first release. Use `pyproject.toml` entry point `hermes_agent.plugins` per Hermes' documented plugin discovery.
+3. **PyPI registration**: `memex-hermes` is a new package name; reserve it before first release. Note (verified, see `spike/SPIKE-COMPLETE.md` R1): the `hermes_agent.plugins` entry-point is inventory-only and does NOT activate a memory provider — runtime activation requires the provider directory at `$HERMES_HOME/plugins/memex/` plus the `memory.provider: memex` config key. The pip install must therefore materialize that directory (postinstall/installer step), not rely on the entry-point alone.
 
-Rollback: uninstall via `pip uninstall memex-hermes` or `hermes plugins disable memex` — fully reversible; no state outside `$HERMES_HOME/cache/memex/` and the optional sync repo.
+Rollback: uninstall via `pip uninstall memex-hermes` and remove `$HERMES_HOME/plugins/memex/`, then clear the `memory.provider` config key — fully reversible; no state outside `$HERMES_HOME/cache/memex/` and the optional sync repo. (There is no `hermes plugins disable` step for memory providers; deactivation is via the config key.)
 
 ## Open Questions
 

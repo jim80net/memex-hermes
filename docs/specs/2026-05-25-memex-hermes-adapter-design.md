@@ -29,7 +29,7 @@ Cross-platform sync is the load-bearing requirement. Every architectural choice 
 |---|---|---|
 | C1 | Integrate as a Hermes **`MemoryProvider`** subclass (not a generic `pre_llm_call` plugin) | First-class contract; gets prefetch/sync_turn/on_session_end/on_memory_write for free; peers with Honcho/Mem0/RetainDB |
 | C2 | Engine = **subprocess to the existing `bun build --compile` `memex` binary** | Reuses 100% of memex-core; on-disk format guaranteed byte-identical to other adapters; same artifact downloaded by the same installer pattern |
-| C3 | Python plugin distributed via **pip entry point** (`hermes_agent.plugins`) AND copy-into-`~/.hermes/plugins/` | Mirrors the two install paths Hermes documents |
+| C3 | Provider installed as a **directory at `$HERMES_HOME/plugins/memex/`** (manual clone or pip-install-plus-materialize) and activated via the **`memory.provider: memex` config key**; the `hermes_agent.plugins` entry-point is inventory-only and does NOT activate a memory provider | Verified against Hermes v0.14.0 source (`spike/SPIKE-COMPLETE.md` R1): the generic entry-point PluginManager skips `memory/`; memory providers load only via the `plugins/memory` dir-scan + config key. Single external provider at a time. (Revised from the docs-based v2 assumption.) |
 | C4 | Cache root = **`~/.hermes/cache/memex/`**, not `~/.claude/cache/` | Sandboxed per-harness; telemetry stays attributable; sync bridges them at the git layer, not the cache layer |
 | C5 | **Rules land in `$HERMES_HOME/skills/<name>/SKILL.md` with `type: rule` in frontmatter** — no new on-disk directory | Hermes' Skills UI/CLI/Hub already surfaces this dir; inventing `$HERMES_HOME/rules/` would create a foreign directory that doesn't appear in `hermes skills` / SkillsHub. memex-core already differentiates entries by frontmatter `type:` field. (Reversed from v0 draft per systems-review F4.) |
 | C6 | Sync repo path = **`~/.local/share/memex-hermes/`** | Parallels `~/.local/share/memex-claude/`; same git repo URL can be configured for both adapters |
@@ -225,54 +225,36 @@ Inherits memex-core's git conflict policy: rebase pull, auto-resolve markdown co
 
 **Cross-adapter push race recovery (F9).** When multiple adapters push to the same remote concurrently, the second push gets rejected (non-fast-forward). On rejection, the engine retries `git pull --rebase` + `git push` up to `sync.pushRetries` (default 3) times with exponential backoff (200 ms, 400 ms, 800 ms). After exhausting retries, the local commit stays in the branch and a warning surfaces via the Hermes logger; the next session's `initialize()`-time pull catches up. If memex-core does not yet implement this retry loop, an upstream issue is filed and tracked against this spec.
 
-### 8.4 `on_memory_write` verification gate (F7)
+### 8.4 `on_memory_write` verification gate (F7) — RESOLVED FROM SOURCE (2026-05-26)
 
-The MEMORY.md mirror path in §8.1 depends on Hermes firing `on_memory_write` when its built-in `remember` tool writes to MEMORY.md. The Hermes docs strongly suggest this but do not prove it. **Before implementation, a one-file verification spike runs:**
+The MEMORY.md mirror path in §8.1 depends on Hermes firing `on_memory_write` when its built-in `remember` tool writes to MEMORY.md. This was resolved by reading the Hermes v0.14.0 source directly (an editable install was available on the resume host); full findings with file:line citations are in **`spike/SPIKE-COMPLETE.md`**.
 
-```python
-# spike/verify_on_memory_write.py
-from agent.memory_provider import MemoryProvider
+**Outcome:** `on_memory_write` **fires for built-in writes** — the built-in tool calls `MemoryManager.on_memory_write` (`agent/tool_executor.py:642`, `agent/agent_runtime_helpers.py:1546`), which fans out to every non-builtin provider (`agent/memory_manager.py:537-565`). Therefore:
 
-class TraceProvider(MemoryProvider):
-    name = "trace"
-    def is_available(self): return True
-    def initialize(self, session_id, **kw): print(f"init {session_id} kw={kw}")
-    def on_memory_write(self, action, target, content):
-        print(f"FIRED: action={action} target={target} content_len={len(content)}")
-    # ... stubs for other required methods
-```
+- **`on_memory_write` is the primary mirror trigger.**
+- The **mtime-watcher inside `sync_turn`** remains the secondary safety net for out-of-band writes (direct disk edits, external tools). On every `sync_turn` call we compare mtimes on `$HERMES_HOME/memories/{MEMORY,USER}.md` against the values recorded on the previous `sync_turn` (cached in `$HERMES_HOME/cache/memex/memory-mtimes.json`); any change triggers a mirror + commit. One `stat` call per turn.
 
-Run `hermes plugins enable trace`, exercise the built-in `remember` tool, observe whether `FIRED:` prints. **Two outcomes:**
-
-- **Fires for built-in writes:** proceed as designed. `on_memory_write` is the mirror trigger.
-- **Does not fire (only fires for provider-owned writes):** fall back to the **mtime-watcher fallback already wired into `sync_turn()`** (§5). On every `sync_turn` call we compare mtimes on `$HERMES_HOME/memories/{MEMORY,USER}.md` against the values we recorded on the previous `sync_turn` (cached in `$HERMES_HOME/cache/memex/memory-mtimes.json`); any change triggers a mirror + commit. This is a simple, reliable fallback that costs one `stat` call per turn.
-
-Both code paths are implemented; the verification spike picks which is primary. This avoids guessing about an unproven contract.
+Both code paths ship (G19). Source verification also surfaced seven contract divergences (R1–R7 in `spike/SPIKE-COMPLETE.md`), filed back into the openspec change: the real registration mechanism (dir-scan + `memory.provider` config key, NOT the `hermes_agent.plugins` entry-point), the single-external-provider constraint, the `on_memory_write` `metadata` 4th argument, three optional hooks (`on_turn_start`, `on_session_switch`, `on_delegation`), the `agent_context` write-suppression signal, the keyword-only `session_id` parameters, and framework auto-injection of `hermes_home`.
 
 ## 9. Distribution & install
 
-Two paths, mirroring Hermes' documented options:
+**Registration reality (verified — `spike/SPIKE-COMPLETE.md` R1):** Hermes discovers memory providers by scanning `plugins/memory/<name>/` (bundled) and `$HERMES_HOME/plugins/<name>/` (user), and activates the one named by the `memory.provider` config key. The generic `hermes_agent.plugins` entry-point PluginManager explicitly skips `memory/` and has no `register_memory_provider`. **So the provider must exist as a directory under `$HERMES_HOME/plugins/memex/` and be selected via config — the entry-point alone does not activate it.** Only one external memory provider may be active at a time.
 
-**A. Pip-installable package** (recommended for distribution):
-```toml
-# pyproject.toml
-[project.entry-points."hermes_agent.plugins"]
-memex = "memex_hermes"
-```
+**A. Pip-installable package** (for distribution): the wheel MAY declare a `hermes_agent.plugins` entry-point for `hermes plugins list` visibility, but a postinstall/installer step (e.g. `python -m memex_hermes.install`) MUST materialize the provider directory at `$HERMES_HOME/plugins/memex/`:
 ```bash
 pip install memex-hermes
-hermes plugins enable memex
+python -m memex_hermes.install          # copies/symlinks provider into $HERMES_HOME/plugins/memex/
+# then set memory.provider: memex in $HERMES_HOME/config.yaml
 ```
-On first `register()` call, the bundled `bin/memex` wrapper downloads the right prebuilt binary for the platform into `~/.hermes/cache/memex/bin/`. SHA256 verified against `checksums.txt` shipped in the GitHub release.
 
-**B. Manual clone into `~/.hermes/plugins/`** (for developers):
+**B. Manual clone into `$HERMES_HOME/plugins/`** (for developers):
 ```bash
-git clone https://github.com/jim80net/memex-hermes ~/.hermes/plugins/memex
-~/.hermes/plugins/memex/bin/install.sh    # downloads binary
-hermes plugins enable memex
+git clone https://github.com/jim80net/memex-hermes "$HERMES_HOME/plugins/memex"
+"$HERMES_HOME/plugins/memex/bin/install.sh"    # downloads binary
+# then set memory.provider: memex in $HERMES_HOME/config.yaml
 ```
 
-The binary download wrapper is reused unchanged from `memex-claude/bin/install.sh` — both projects share the same upstream `memex` binary releases.
+Activation in both paths is the `memory.provider: memex` config key (NOT `hermes plugins enable`). On first `register()`/load, the bundled `bin/memex` wrapper downloads the right prebuilt binary for the platform into `$HERMES_HOME/cache/memex/bin/`, SHA256-verified against `checksums.txt` shipped in the GitHub release. The binary download wrapper is reused unchanged from `memex-claude/bin/install.sh` — both projects share the same upstream `memex` binary releases.
 
 ## 10. Failure modes & error handling
 
@@ -380,7 +362,7 @@ memex-hermes/
 
 ## 14. Success criteria for v1
 
-- [ ] `pip install memex-hermes` followed by `hermes plugins enable memex` produces a working install with no extra steps.
+- [ ] `pip install memex-hermes`, the materialize step (`python -m memex_hermes.install`), and setting `memory.provider: memex` in `config.yaml` produce a working, activated provider.
 - [ ] A skill authored in `$HERMES_HOME/skills/foo/SKILL.md` is matched and surfaced by Hermes when the user types a relevant query.
 - [ ] A memory written via `memex_remember` from a Hermes session is visible to a `memex-claude` session running against the same sync repo within one sync cycle.
 - [ ] A memory written via Hermes' built-in `remember` tool (to `MEMORY.md`) is mirrored to the sync repo on the next `on_memory_write` event OR (fallback) on the next `sync_turn` mtime-watcher pass.
