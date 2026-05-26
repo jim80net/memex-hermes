@@ -1,0 +1,24 @@
+name: memex
+version: 0.1.0
+description: |
+  Memex skill/memory/rule router for Hermes Agent — semantic context injection
+  via the MemoryProvider contract. Integrates as a peer to Honcho/Mem0/RetainDB
+  and bridges Hermes into the cross-platform memex sync repo shared with
+  memex-claude and memex-openclaw.
+author: Jim Park
+url: https://github.com/jim80net/memex-hermes
+
+# Memory provider, not a tool/hook plugin. Hermes discovers via
+# ctx.register_memory_provider() called from memex_hermes/__init__.py.
+provides_memory_providers:
+  - memex
+
+# Three agent-callable tools registered via the provider's get_tool_schemas().
+provides_tools:
+  - memex_search
+  - memex_remember
+  - memex_recall
+
+# Environment requirements. The MEMEX_HERMES_HOME env var defaults to
+# $HERMES_HOME at runtime (captured during initialize()); no manual export needed.
+requires_env: []

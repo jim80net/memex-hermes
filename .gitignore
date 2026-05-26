@@ -1,0 +1,21 @@
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+.venv/
+
+# Spike outputs (kept locally; not version-controlled)
+spike/*-trace.log
+
+# Editors / OS
+.DS_Store
+*.swp

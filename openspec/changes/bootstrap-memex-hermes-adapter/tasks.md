@@ -1,17 +1,17 @@
 ## 1. Repository scaffolding
 
-- [ ] 1.1 Add `pyproject.toml` with `memex-hermes` package metadata, Python ≥ 3.10, dev dependencies (pytest, pyyaml, jsonschema), and `[project.entry-points."hermes_agent.plugins"]` entry `memex = "memex_hermes"`
-- [ ] 1.2 Add `package.json` with `@jim80net/memex-core` as a published dependency, TypeScript devDeps (tsc, vitest, biome), and scripts `build`, `test`, `typecheck`
-- [ ] 1.3 Add `tsconfig.json` (extending the same shape used in `memex-claude` / `memex-openclaw`)
-- [ ] 1.4 Add `biome.json` config matching `memex-openclaw`
-- [ ] 1.5 Add `vitest.config.ts` and `pytest.ini`
-- [ ] 1.6 Add `plugin.yaml` declaring `name: memex`, `version`, `description`, `provides_hooks`, and provider metadata per Hermes' Build-a-Hermes-Plugin guide
-- [ ] 1.7 Add `LICENSE` (MIT, matching the family), `CONTRIBUTING.md` (dev setup), and `README.md` (user-facing intro mirroring `memex-claude` tone)
-- [ ] 1.8 Add `CLAUDE.md` documenting the project's architecture, conventions, and the dual Python/TypeScript layering for AI dev assistance
+- [x] 1.1 Add `pyproject.toml` with `memex-hermes` package metadata, Python ≥ 3.10, dev dependencies (pytest, pyyaml, jsonschema), and `[project.entry-points."hermes_agent.plugins"]` entry `memex = "memex_hermes"`
+- [x] 1.2 Add `package.json` with `@jim80net/memex-core` as a published dependency, TypeScript devDeps (tsc, vitest, biome), and scripts `build`, `test`, `typecheck`
+- [x] 1.3 Add `tsconfig.json` (extending the same shape used in `memex-claude` / `memex-openclaw`)
+- [x] 1.4 Add `biome.json` config matching `memex-openclaw`
+- [x] 1.5 Add `vitest.config.ts` and `pytest.ini` (pytest config inlined in `pyproject.toml`'s `[tool.pytest.ini_options]`)
+- [x] 1.6 Add `plugin.yaml` declaring `name: memex`, `version`, `description`, `provides_hooks`, and provider metadata per Hermes' Build-a-Hermes-Plugin guide
+- [x] 1.7 Add `LICENSE` (MIT, matching the family), `CONTRIBUTING.md` (dev setup), and `README.md` (user-facing intro mirroring `memex-claude` tone)
+- [x] 1.8 Add `CLAUDE.md` documenting the project's architecture, conventions, and the dual Python/TypeScript layering for AI dev assistance
 
 ## 2. Pre-implementation verification spike (D9 / F7 / F11) — **GATES §3-§8**
 
-- [ ] 2.1 Write `spike/trace_provider.py` — a one-file `MemoryProvider` subclass that prints every callback invocation with its name and full argument list
+- [x] 2.1 Write `spike/trace_provider.py` — a one-file `MemoryProvider` subclass that prints every callback invocation with its name and full argument list
 - [ ] 2.2 Install the spike as a Hermes plugin in a scratch `$HERMES_HOME` and enable it
 - [ ] 2.3 Exercise the built-in `remember` tool, a normal turn, a session end, and a compression; capture which callbacks fire with which payloads
 - [ ] 2.4 Capture the exact return-type expectations for `get_tool_schemas()` and `handle_tool_call()` by inspecting `agent/memory_provider.py` (read the Python source if open; otherwise infer from trace output)

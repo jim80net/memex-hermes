@@ -1,0 +1,30 @@
+{
+  "name": "memex-hermes-engine",
+  "version": "0.1.0",
+  "description": "TypeScript engine extensions for memex-hermes: Hermes.* hook_event_name dispatch handlers that ride on the shared @jim80net/memex-core binary. Not published to npm; bundled into the prebuilt memex binary.",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jim80net/memex-hermes"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "bun run build.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/ test/ts/",
+    "lint:fix": "biome check --write src/ test/ts/",
+    "check": "pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.7",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@jim80net/memex-core": "^0.3.1"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
