@@ -4,10 +4,11 @@
 
 The system SHALL provide a Python class `MemexProvider` in `memex_hermes/provider.py` that subclasses `agent.memory_provider.MemoryProvider` and implements every method the Hermes runtime invokes on a memory provider.
 
-#### Scenario: Provider registers via plugin entry point
-- **WHEN** Hermes loads installed plugins and calls `register(ctx)` on the `memex_hermes` package
+#### Scenario: Provider is loaded from its directory and registered
+- **GIVEN** the provider directory at `$HERMES_HOME/plugins/memex/` with an `__init__.py` exposing `register(ctx)` (or a top-level `MemexProvider` subclass)
+- **WHEN** `load_memory_provider("memex")` imports the module (`plugins/memory/__init__.py:185-285`) and calls `register(collector)`
 - **THEN** the package calls `ctx.register_memory_provider(MemexProvider())` exactly once
-- **AND** `MemexProvider` is recognized by Hermes as an instance of `MemoryProvider`
+- **AND** `MemexProvider` is recognized by Hermes as an instance of `MemoryProvider` and added to the `MemoryManager` when `memory.provider: memex` is configured
 
 #### Scenario: Provider exposes the name "memex"
 - **WHEN** Hermes reads `provider.name`
@@ -44,15 +45,34 @@ The output of `provider.system_prompt_block()` SHALL be stable for the lifetime 
 - **THEN** the returned string describes the `memex_search` / `memex_remember` / `memex_recall` tools
 - **AND** if sync is enabled, the string identifies the sync repo path and last-pull timestamp
 
-### Requirement: initialize captures session_id and the runtime HERMES_HOME
+### Requirement: initialize captures session_id, runtime HERMES_HOME, and the agent context
 
-`initialize(session_id, **kwargs)` SHALL persist `session_id` and the runtime `hermes_home` value (sourced from `kwargs`, `save_config`-recorded state, or the `HERMES_HOME` environment variable in that order) for use by every subsequent binary invocation in the session.
+`initialize(session_id, **kwargs)` SHALL persist `session_id`, the runtime `hermes_home` value, and the `agent_context` value for use by every subsequent binary invocation in the session. The Hermes framework auto-injects `hermes_home` into `kwargs` (`agent/memory_manager.py:599-601`) and the CLI activation sets `agent_context="primary"` (`agent/agent_init.py:1013`); the adapter SHALL still resolve `hermes_home` defensively in the order `kwargs` → `save_config`-recorded state → `HERMES_HOME` environment variable. The kwargs MAY also include `agent_identity`, `agent_workspace`, `parent_session_id`, `user_id`, and platform/chat identifiers; the adapter SHALL accept and ignore any kwargs it does not consume without raising.
 
 #### Scenario: Subsequent invocations propagate the captured HERMES_HOME
 - **GIVEN** `HERMES_HOME=/data/hermes` at process start
-- **WHEN** `initialize("sess-1")` is called
+- **WHEN** `initialize("sess-1", hermes_home="/data/hermes", platform="cli", agent_context="primary")` is called
 - **AND** then `prefetch("query")` is called
 - **THEN** the subprocess invocation for `prefetch` receives `MEMEX_HERMES_HOME=/data/hermes` in its environment
+
+#### Scenario: Unknown kwargs are tolerated
+- **WHEN** `initialize` is called with extra kwargs such as `session_title`, `chat_id`, `agent_workspace`
+- **THEN** initialization succeeds and the provider does not raise on the unrecognized kwargs
+
+### Requirement: Writes are suppressed for non-primary agent contexts
+
+When `initialize` reports an `agent_context` other than `"primary"` (i.e. `"subagent"`, `"cron"`, or `"flush"`), the provider SHALL suppress mirror/sync writes (`sync_turn`, `on_memory_write`, `on_session_end` extraction) for the session, because non-primary contexts (e.g. cron system prompts) would corrupt the user's representation (`agent/memory_provider.py:67-81`). Read paths (`prefetch`, `system_prompt_block`, `handle_tool_call` for search/recall) MAY remain active.
+
+#### Scenario: Subagent context suppresses sync writes
+- **GIVEN** `initialize(..., agent_context="subagent")` was called
+- **WHEN** `sync_turn(...)` or `on_memory_write(...)` fires for that session
+- **THEN** no entry is persisted and no commit/push is dispatched for that session
+- **AND** an informational log line explains the context-based suppression
+
+#### Scenario: Primary context writes normally
+- **GIVEN** `initialize(..., agent_context="primary")` was called
+- **WHEN** `sync_turn(...)` fires
+- **THEN** the turn is persisted per the normal sync path
 
 ### Requirement: save_config writes to the hermes_home argument
 
@@ -113,15 +133,45 @@ The Python package `memex_hermes` SHALL NOT contain its own implementations of e
 - **THEN** none are found
 - **AND** the only subprocess invocations are of the `memex` binary itself
 
+### Requirement: Provider method signatures match the verified ABC
+
+`MemexProvider` SHALL declare signatures that match `agent.memory_provider.MemoryProvider` as verified from source (Hermes v0.14.0, recorded in `spike/SPIKE-COMPLETE.md`): `prefetch(query, *, session_id="")`, `queue_prefetch(query, *, session_id="")`, `sync_turn(user_content, assistant_content, *, session_id="")`, `handle_tool_call(tool_name, args, **kwargs)`, `on_pre_compress(messages) -> str`, `get_config_schema() -> list`, `save_config(values, hermes_home)`, and `on_memory_write(action, target, content, metadata=None)`. The `session_id` parameters are keyword-only because the `MemoryManager` passes them by keyword (`agent/memory_manager.py:348,362,375`); omitting them would raise `TypeError` and be silently swallowed by the manager's per-provider guard, making the callback appear dead.
+
+#### Scenario: Manager-style keyword calls do not raise
+- **WHEN** the manager calls `prefetch(q, session_id="s")`, `sync_turn(u, a, session_id="s")`, and `on_memory_write(action, target, content, metadata={...})`
+- **THEN** each call is accepted without `TypeError`
+- **AND** the keyword arguments are available to the handler
+
 ### Requirement: Lifecycle methods dispatch to the correct engine events
 
-Each Hermes-invoked provider lifecycle method SHALL dispatch to the corresponding `Hermes.*` event when it invokes the binary: `initialize`→`Hermes.init`, `system_prompt_block`→`Hermes.system-prompt`, `prefetch`→`Hermes.prefetch`, `queue_prefetch`→`Hermes.queue-prefetch`, `sync_turn`→`Hermes.sync-turn`, `on_session_end`→`Hermes.session-end`, `on_pre_compress`→`Hermes.pre-compress`, `on_memory_write`→`Hermes.memory-write`, `shutdown`→`Hermes.shutdown`, `is_available`→`Hermes.health`, `handle_tool_call("memex_search", ...)`→`Hermes.tool-search`, `handle_tool_call("memex_remember", ...)`→`Hermes.tool-remember`, `handle_tool_call("memex_recall", ...)`→`Hermes.tool-recall`. `name`, `get_tool_schemas`, `get_config_schema`, and `save_config` do not invoke the binary. (Per G3 from the openspec systems-review.)
+Each Hermes-invoked provider lifecycle method SHALL dispatch to the corresponding `Hermes.*` event when it invokes the binary: `initialize`→`Hermes.init`, `system_prompt_block`→`Hermes.system-prompt`, `prefetch`→`Hermes.prefetch`, `queue_prefetch`→`Hermes.queue-prefetch`, `sync_turn`→`Hermes.sync-turn`, `on_session_end`→`Hermes.session-end`, `on_pre_compress`→`Hermes.pre-compress`, `on_memory_write`→`Hermes.memory-write` (forwarding `action`, `target`, `content`, and the `metadata` dict), `on_session_switch`→`Hermes.session-switch`, `shutdown`→`Hermes.shutdown`, `is_available`→`Hermes.health`, `handle_tool_call("memex_search", ...)`→`Hermes.tool-search`, `handle_tool_call("memex_remember", ...)`→`Hermes.tool-remember`, `handle_tool_call("memex_recall", ...)`→`Hermes.tool-recall`. `name`, `get_tool_schemas`, `get_config_schema`, `save_config`, `on_turn_start`, and `on_delegation` do not invoke the binary in v1 (`on_turn_start` and `on_delegation` are accepted as no-ops). (Per G3 from the openspec systems-review; extended for R3/R4 from `spike/SPIKE-COMPLETE.md`.)
 
 #### Scenario: Each provider method invokes the documented event
 - **GIVEN** the runner is replaced with a stub that records every `hook_event_name` it receives
 - **WHEN** each listed method is invoked once with representative arguments
 - **THEN** the recorded `hook_event_name` per call matches the documented mapping
-- **AND** `name`, `get_tool_schemas`, `get_config_schema`, `save_config` produce no recorded entries
+- **AND** `name`, `get_tool_schemas`, `get_config_schema`, `save_config`, `on_turn_start`, `on_delegation` produce no recorded entries
+
+#### Scenario: on_memory_write forwards the metadata dict
+- **WHEN** `on_memory_write("add", "memory", "x", metadata={"write_origin": "remember", "session_id": "s1"})` is invoked
+- **THEN** the `Hermes.memory-write` envelope carries the `action`, `target`, `content`, AND `metadata` fields
+
+### Requirement: Optional hooks are implemented to preserve session scoping
+
+`MemexProvider` SHALL implement the optional hooks that affect correctness: `on_session_switch(new_session_id, *, parent_session_id="", reset=False, **kwargs)` SHALL refresh the cached `session_id` and project-ID scope so writes after a `/resume`, `/branch`, `/reset`, `/new`, or context compression land in the correct session's record (`agent/memory_provider.py:163-200`). `on_turn_start` and `on_delegation` SHALL be accepted with no-op (or log-only) bodies in v1 so their invocation never raises. Hooks the adapter does not use SHALL retain the ABC's no-op default behavior.
+
+#### Scenario: Session switch updates cached scope
+- **GIVEN** `initialize("sess-A")` cached `session_id = "sess-A"`
+- **WHEN** `on_session_switch("sess-B", reset=False)` fires
+- **THEN** subsequent `sync_turn` / `on_memory_write` invocations are scoped to `sess-B`
+
+#### Scenario: Reset flushes accumulated per-session buffers
+- **WHEN** `on_session_switch("sess-C", reset=True)` fires
+- **THEN** any accumulated per-session state for the prior session is flushed before scoping to `sess-C`
+
+#### Scenario: Unused optional hooks do not raise
+- **WHEN** `on_turn_start(3, "msg", model="x")` and `on_delegation("task", "result", child_session_id="c")` are invoked
+- **THEN** neither raises and neither invokes the binary in v1
 
 ### Requirement: shutdown drains in-flight write operations within bound
 

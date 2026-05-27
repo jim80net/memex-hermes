@@ -2,7 +2,7 @@
 
 ### Requirement: All Hermes paths derive from the runtime HERMES_HOME
 
-The adapter SHALL derive every Hermes-side path from the runtime `HERMES_HOME` value (default `~/.hermes/`). The Python layer reads `HERMES_HOME` from the environment or from the `hermes_home` argument passed to `save_config(values, hermes_home)`. The TypeScript engine reads `MEMEX_HERMES_HOME` from the environment, which the Python runner sets on every subprocess invocation. No code in either layer SHALL hardcode the literal string `~/.hermes`.
+The adapter SHALL derive every Hermes-side path from the runtime `HERMES_HOME` value (default `~/.hermes/`). The Python layer SHALL resolve `hermes_home` in priority order: (1) the `hermes_home` kwarg the framework auto-injects into `initialize(**kwargs)` (`agent/memory_manager.py:599-601`), (2) the `hermes_home` argument passed to `save_config(values, hermes_home)`, (3) the `HERMES_HOME` environment variable. The TypeScript engine reads `MEMEX_HERMES_HOME` from the environment, which the Python runner sets on every subprocess invocation. No code in either layer SHALL hardcode the literal string `~/.hermes`.
 
 #### Scenario: Custom HERMES_HOME is honored end-to-end
 - **GIVEN** `HERMES_HOME=/data/hermes` is set when Hermes starts

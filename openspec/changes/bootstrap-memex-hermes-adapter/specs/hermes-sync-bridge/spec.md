@@ -2,7 +2,13 @@
 
 ### Requirement: Hermes built-in memory writes propagate to the shared sync repo
 
-A write performed by Hermes' built-in `remember` tool (or any other mechanism that modifies `$HERMES_HOME/memories/{MEMORY,USER}.md`) SHALL be mirrored into the local sync repo at `<sync_repo>/projects/<project-id>/memory/<target>.md` and committed. The system SHALL implement BOTH mirror paths — the `on_memory_write` callback handler AND the mtime-watcher inside `Hermes.sync-turn` — regardless of which the verification spike (see `hermes-memory-provider`) selects as primary. The primary path is the one that fires under normal Hermes operation; the secondary acts as a safety net for the cases where the primary is silent (e.g., direct disk edits, out-of-band tools). (Per G19 from the openspec systems-review.)
+A write performed by Hermes' built-in `remember` tool (or any other mechanism that modifies `$HERMES_HOME/memories/{MEMORY,USER}.md`) SHALL be mirrored into the local sync repo and committed. The `on_memory_write` `target` value is `"memory"` or `"user"` (NOT a filename) and SHALL be mapped to `MEMORY.md` / `USER.md` respectively, mirrored at `<sync_repo>/projects/<project-id>/memory/MEMORY.md` (or `USER.md`). The system SHALL implement BOTH mirror paths — the `on_memory_write` callback handler AND the mtime-watcher inside `Hermes.sync-turn`. Per the source verification in `spike/SPIKE-COMPLETE.md`, the `on_memory_write` callback **is the primary path for `add`/`replace`** (it is confirmed to fire for built-in writes at `agent/tool_executor.py:642`). The built-in memory tool gates the callback on `action in {"add","replace"}` (`agent/tool_executor.py:640`, `agent/agent_runtime_helpers.py:1544`), so a built-in **`remove` does NOT fire `on_memory_write`** — the mtime-watcher is the path that captures removals (and out-of-band writes) by re-mirroring the full current file content. The mtime-watcher is therefore mandatory, not optional. (Per G19 from the openspec systems-review; primary path resolved per R1/Q1.)
+
+#### Scenario: Built-in remove is captured by the mtime path, not the callback
+- **GIVEN** `sync.enabled = true`, a non-session project ID, and a mirrored `MEMORY.md`
+- **WHEN** the built-in memory tool performs a `remove` (which does not fire `on_memory_write`)
+- **THEN** the next `Hermes.sync-turn` detects the `MEMORY.md` mtime change
+- **AND** re-mirrors the full current file content (reflecting the removal) and commits
 
 #### Scenario: MEMORY.md edit reaches the sync repo
 - **GIVEN** `sync.enabled = true` and a non-session project ID
@@ -37,6 +43,21 @@ When the current project ID is in the `_session/*` namespace (i.e., Hermes did n
 - **THEN** the entry is written under `<sync_repo>/projects/explicit-name/memory/`
 - **AND** push proceeds normally
 - **AND** the entry is not associated with the `_session/*` ID
+
+### Requirement: Non-primary execution contexts do not mirror or push
+
+In addition to the `_session/*` suppression above, the mirror/sync path SHALL suppress writes originating from non-primary execution contexts. The signal is twofold: the `agent_context` captured at `initialize` (`"subagent"`, `"cron"`, `"flush"`) AND the per-write `metadata` provenance on `on_memory_write` (e.g. `execution_context`, `write_origin`). When either indicates a non-primary context, the write SHALL be dropped before commit (`agent/memory_provider.py:67-81`). This prevents cron system prompts and subagent scratch writes from corrupting the user's synced representation.
+
+#### Scenario: Cron-context memory write is dropped
+- **GIVEN** the session was initialized with `agent_context="cron"` (or `on_memory_write` metadata carries `execution_context="cron"`)
+- **WHEN** `on_memory_write` fires
+- **THEN** no mirror file is written and no commit/push occurs
+- **AND** an informational log line explains the context-based suppression
+
+#### Scenario: Primary-context write proceeds
+- **GIVEN** `agent_context="primary"` and primary `metadata` provenance
+- **WHEN** `on_memory_write` fires for a non-session project ID with `sync.enabled = true`
+- **THEN** the mirror is written, committed, and a push is dispatched
 
 ### Requirement: Project ID canonicalization matches the other adapters
 

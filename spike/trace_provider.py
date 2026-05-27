@@ -16,22 +16,25 @@ notably: does on_memory_write fire when Hermes' built-in `remember` tool
 writes to MEMORY.md, or only for provider-owned writes?
 
 This trace provider does nothing except print every callback invocation
-to a log file. Run it against a live Hermes session, exercise the built-in
-remember tool, a normal turn, a session end, and a compression — then read
-the log and update docs/specs/2026-05-25-memex-hermes-adapter-design.md §8.4
-with what you observed.
+to a log file. The contract has already been resolved from Hermes source
+(see spike/SPIKE-COMPLETE.md); this file is retained for an OPTIONAL runtime
+confirmation of metadata keys, system_prompt_block call count, and which
+optional hooks fire in a vanilla session.
 
-Install:
+Install — memory providers are discovered by a DIRECTORY SCAN of
+$HERMES_HOME/plugins/<name>/ and activated via the `memory.provider` config
+key. There is NO `hermes plugins enable` step and NO `provides_memory_providers`
+manifest key for memory providers; the generic entry-point PluginManager
+explicitly skips memory/ (verified: hermes_cli/plugins.py:819-829,1073-1078).
+Only ONE external memory provider may be active at a time, so use a SCRATCH
+HERMES_HOME so this does not displace the user's real provider:
 
+    export HERMES_HOME=/tmp/hermes-spike
     mkdir -p "$HERMES_HOME/plugins/memex-trace"
     cp spike/trace_provider.py "$HERMES_HOME/plugins/memex-trace/__init__.py"
-    cat > "$HERMES_HOME/plugins/memex-trace/plugin.yaml" <<EOF
-    name: memex-trace
-    version: 0.0.0-spike
-    description: Verification spike — traces MemoryProvider callbacks
-    provides_memory_providers: [memex-trace]
-    EOF
-    hermes plugins enable memex-trace
+    # Select this provider (config.yaml uses `memory:` -> `provider:`):
+    mkdir -p "$HERMES_HOME"
+    printf 'memory:\n  provider: memex-trace\n' >> "$HERMES_HOME/config.yaml"
 
 Then run hermes interactively and exercise:
 
@@ -122,25 +125,40 @@ class TraceProvider(MemoryProvider):  # type: ignore[misc]
         _log("system_prompt_block")
         return "[memex-trace spike active — this block is static]"
 
-    def prefetch(self, query: str) -> str:
-        _log("prefetch", query_len=len(query), query_preview=query[:80])
+    def prefetch(self, query: str, *, session_id: str = "") -> str:
+        _log("prefetch", query_len=len(query), query_preview=query[:80], session_id=session_id)
         return ""
 
-    def queue_prefetch(self, query: str) -> None:
-        _log("queue_prefetch", query_len=len(query), query_preview=query[:80])
+    def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
+        _log("queue_prefetch", query_len=len(query), query_preview=query[:80], session_id=session_id)
 
-    def sync_turn(self, user: Any, assistant: Any) -> None:
-        _log("sync_turn", user_type=type(user).__name__, assistant_type=type(assistant).__name__)
+    def sync_turn(self, user_content: Any, assistant_content: Any, *, session_id: str = "") -> None:
+        _log(
+            "sync_turn",
+            user_type=type(user_content).__name__,
+            assistant_type=type(assistant_content).__name__,
+            session_id=session_id,
+        )
+
+    def on_turn_start(self, turn_number: int, message: Any, **kwargs: Any) -> None:
+        _log("on_turn_start", turn_number=turn_number, message_preview=str(message)[:80], kwargs=_safe(kwargs))
 
     def on_session_end(self, messages: Any) -> None:
         _log("on_session_end", message_count=_safe_len(messages))
 
-    def on_pre_compress(self, messages: Any) -> None:
-        _log("on_pre_compress", message_count=_safe_len(messages))
+    def on_session_switch(self, new_session_id: str, *, parent_session_id: str = "", reset: bool = False, **kwargs: Any) -> None:
+        _log("on_session_switch", new_session_id=new_session_id, parent_session_id=parent_session_id, reset=reset, kwargs=_safe(kwargs))
 
-    def on_memory_write(self, action: Any, target: Any, content: Any) -> None:
-        # THE critical callback: does this fire when Hermes' built-in `remember`
-        # tool writes to MEMORY.md? The answer drives the spec's primary mirror path.
+    def on_pre_compress(self, messages: Any) -> str:
+        _log("on_pre_compress", message_count=_safe_len(messages))
+        return ""
+
+    def on_delegation(self, task: Any, result: Any, *, child_session_id: str = "", **kwargs: Any) -> None:
+        _log("on_delegation", task_preview=str(task)[:80], result_preview=str(result)[:80], child_session_id=child_session_id, kwargs=_safe(kwargs))
+
+    def on_memory_write(self, action: Any, target: Any, content: Any, metadata: Any = None) -> None:
+        # THE critical callback: confirmed from source to fire when Hermes' built-in
+        # `remember` tool writes (tool_executor.py:642). This run confirms the metadata keys.
         _log(
             "on_memory_write",
             action=_safe(action),
@@ -148,6 +166,7 @@ class TraceProvider(MemoryProvider):  # type: ignore[misc]
             content_type=type(content).__name__,
             content_len=_safe_len(content),
             content_preview=str(content)[:200] if content is not None else None,
+            metadata=_safe(metadata),
         )
 
     def shutdown(self) -> None:
@@ -157,13 +176,13 @@ class TraceProvider(MemoryProvider):  # type: ignore[misc]
         _log("get_tool_schemas")
         return []
 
-    def handle_tool_call(self, name: str, args: dict[str, Any]) -> Any:
-        _log("handle_tool_call", name=name, args=_safe(args))
+    def handle_tool_call(self, tool_name: str, args: dict[str, Any], **kwargs: Any) -> Any:
+        _log("handle_tool_call", tool_name=tool_name, args=_safe(args), kwargs=_safe(kwargs))
         return json.dumps({"ok": True, "spike": "no-op"})
 
-    def get_config_schema(self) -> dict[str, Any]:
+    def get_config_schema(self) -> list[dict[str, Any]]:
         _log("get_config_schema")
-        return {"type": "object", "properties": {}}
+        return []
 
     def save_config(self, values: dict[str, Any], hermes_home: str) -> None:
         # Critical for verifying the F6 fix: hermes_home IS passed in.
