@@ -1,0 +1,14 @@
+"""Shared pytest fixtures.
+
+Adds ``test/python`` to ``sys.path`` so cross-test helpers (``fake_binary``)
+can be imported with a flat module name from any test module.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
