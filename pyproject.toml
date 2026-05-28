@@ -40,12 +40,16 @@ dev = [
   "pytest-asyncio>=0.23",
   "mypy>=1.10",
   "ruff>=0.7",
+  "types-PyYAML>=6.0",
 ]
 
-# Pinned upstream `memex` binary release that this plugin version downloads on first run.
-# See bin/memex (the wrapper) and bin/install.sh for download logic; checksums.txt for SHA256 verification.
+# Pinned `memex-hermes` binary release that this plugin version downloads on first run.
+# memex-hermes builds and releases its OWN binary (Option A from the binary-architecture decision):
+# the binary contains the Hermes.* hook_event_name handlers from this repo's src/ and imports
+# @jim80net/memex-core as a library dep. See bin/memex (the wrapper) and bin/install.sh for the
+# download logic; checksums.txt for SHA256 verification.
 [tool.memex-hermes.binary]
-upstream-release = "memex-claude@v1.5.0"  # placeholder — bumped during release
+upstream-release = "memex-hermes@v0.1.0"  # placeholder — bumped to this package's own GitHub release during cut
 
 [tool.hatch.build.targets.wheel]
 packages = ["memex_hermes"]

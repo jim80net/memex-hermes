@@ -1,0 +1,10 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "include": ["memex_hermes", "test/python"],
+  "exclude": [".venv", "node_modules", "spike", "**/__pycache__"],
+  "pythonVersion": "3.11",
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": "none",
+  "useLibraryCodeForTypes": true
+}
