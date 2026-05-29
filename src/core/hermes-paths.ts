@@ -107,6 +107,28 @@ export function resolveSyncRepoDir(syncRepo?: string): string {
 }
 
 /**
+ * Apply a `sync.repo` config override to a base {@link HermesPaths}. Used by
+ * the runtime dispatch in `main.ts` so the resolver actually fires — keeping
+ * `getHermesPaths()` as a pure environment-only resolver while the override
+ * lands at the call site that has access to the loaded config. Returns the
+ * base object unchanged when no local-path override applies.
+ */
+export function applySyncRepoOverride(
+  base: HermesPaths,
+  syncConfig: { repo?: string } | undefined,
+): HermesPaths {
+  // Only LOCAL-PATH overrides move the checkout. Empty/missing/git-URL overrides
+  // mean the caller did not specify a local path — leave the base unchanged so
+  // a user with a non-default `paths.syncRepoDir` does not get reset to the
+  // documented default by a remote-URL config (`resolveSyncRepoDir` flattens
+  // both empty and URL to the default; that's correct for cold resolution but
+  // would be a surprise for an override on top of a base).
+  if (!syncConfig?.repo || !isLocalPath(syncConfig.repo)) return base;
+  if (syncConfig.repo === base.syncRepoDir) return base;
+  return { ...base, syncRepoDir: syncConfig.repo };
+}
+
+/**
  * Project-local skill directory for a cwd. Only scanned when
  * HERMES_ENABLE_PROJECT_PLUGINS is truthy (see {@link projectPluginsEnabled}).
  */

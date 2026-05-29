@@ -3,9 +3,11 @@ import { homedir, tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  applySyncRepoOverride,
   getHermesPaths,
   getProjectMemoryDir,
   getProjectSkillsDir,
+  type HermesPaths,
   projectPluginsEnabled,
   resolveHermesHome,
   resolveSyncRepoDir,
@@ -176,5 +178,62 @@ describe("getHermesPaths — no real ~/.hermes is touched under a redirected hom
     expect(p.skillsDir.startsWith(home)).toBe(true);
     expect(p.cacheDir.startsWith(home)).toBe(true);
     expect(p.configPath.startsWith(home)).toBe(true);
+  });
+});
+
+// Regression: the runtime dispatch must wire applySyncRepoOverride. An earlier
+// build had resolveSyncRepoDir defined but never called from main.ts, so the
+// sync.repo config field was silently ignored. The §11 E2E suite caught this.
+// These cases protect the wiring at the helper boundary.
+describe("applySyncRepoOverride", () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await mkdtemp(join(tmpdir(), "applySyncRepoOverride-"));
+  });
+
+  afterEach(async () => {
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  function baseWithSync(repo: string): HermesPaths {
+    // Derive a real baseline from getHermesPaths and override only the field
+    // under test. Keeps the fixture in sync with the type without enumerating
+    // every field by hand.
+    return { ...getHermesPaths("/h"), syncRepoDir: repo };
+  }
+
+  it("returns the base object unchanged when syncConfig is undefined", () => {
+    const base = baseWithSync("/default/sync");
+    expect(applySyncRepoOverride(base, undefined)).toBe(base);
+  });
+
+  it("returns the base object unchanged when sync.repo is empty", () => {
+    const base = baseWithSync("/default/sync");
+    expect(applySyncRepoOverride(base, { repo: "" })).toBe(base);
+  });
+
+  it("returns the base object unchanged when sync.repo is a git URL", () => {
+    const base = baseWithSync("/default/sync");
+    const ssh = applySyncRepoOverride(base, { repo: "git@github.com:owner/repo.git" });
+    const https = applySyncRepoOverride(base, { repo: "https://github.com/owner/repo.git" });
+    expect(ssh.syncRepoDir).toBe("/default/sync");
+    expect(https.syncRepoDir).toBe("/default/sync");
+  });
+
+  it("overrides syncRepoDir when sync.repo is a local filesystem path", () => {
+    const base = baseWithSync("/default/sync");
+    const out = applySyncRepoOverride(base, { repo: tmp });
+    expect(out.syncRepoDir).toBe(tmp);
+    // Non-sync fields are preserved verbatim
+    expect(out.skillsDir).toBe(base.skillsDir);
+    expect(out.cacheDir).toBe(base.cacheDir);
+    expect(out.configPath).toBe(base.configPath);
+  });
+
+  it("returns the base object unchanged when the override resolves to the existing value", () => {
+    const base = baseWithSync(tmp);
+    const out = applySyncRepoOverride(base, { repo: tmp });
+    expect(out).toBe(base);
   });
 });

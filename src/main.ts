@@ -41,6 +41,7 @@ import {
 } from "./core/envelope.ts";
 import { parseExternalDirs } from "./core/hermes-config-yaml.ts";
 import {
+  applySyncRepoOverride,
   getHermesPaths,
   getProjectMemoryDir,
   getProjectSkillsDir,
@@ -73,7 +74,10 @@ export async function dispatch(
   const config = options.config ?? (await loadConfig());
   if (!config.enabled) return {};
 
-  const paths = options.paths ?? getHermesPaths();
+  // Wire the config-level sync.repo override into the runtime paths.
+  // applySyncRepoOverride short-circuits to the base value for empty / git-URL
+  // overrides; only a local-filesystem path actually moves the checkout.
+  const paths: HermesPaths = applySyncRepoOverride(options.paths ?? getHermesPaths(), config.sync);
   const cwd = input.cwd ?? "";
   const sessionId = input.session_id ?? "";
   const logger = options.logger ?? defaultLogger();
