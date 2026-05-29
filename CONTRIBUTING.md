@@ -7,7 +7,7 @@
 | Tree | Language | Lives in | Responsibility |
 |---|---|---|---|
 | Python plugin | Python ≥ 3.10 | `memex_hermes/` | Implements Hermes' `MemoryProvider` ABC. Translates lifecycle calls to JSON envelopes sent to the binary. Runs all subprocess work off the agent's async event loop. |
-| TypeScript engine extension | TypeScript | `src/` | Implements the `Hermes.*` `hook_event_name` handlers that ride on the shared `memex` binary. Bundled into the `bun build --compile` artifact released by `memex-claude`. |
+| TypeScript engine extension | TypeScript | `src/` | Implements the `Hermes.*` `hook_event_name` handlers compiled into THIS repo's own `memex-hermes` binary (`bun build --compile`, released from `jim80net/memex-hermes`). Imports `@jim80net/memex-core` as a library dep. |
 
 The **`@jim80net/memex-core`** package is the source of truth for embedding, indexing, cache, telemetry, sync, and project-ID semantics. `memex_hermes/` MUST NOT re-implement any of those concerns. Helper modules (envelope construction, schema dicts, Hermes-side path resolution) are fine; engine logic is not. This is enforced by a CI rule (see `test/python/test_no_engine_imports.py`).
 
@@ -32,22 +32,20 @@ pnpm lint               # biome
 mypy memex_hermes       # Python type-check
 ```
 
-## The verification spike
+## The verification spike — resolved from source (2026-05-26)
 
-**Before any implementation work on `memex_hermes/provider.py` begins**, the pre-implementation verification spike (`openspec/changes/bootstrap-memex-hermes-adapter/tasks.md` §2) MUST complete. The spike runs `spike/trace_provider.py` against a live Hermes session to confirm which `MemoryProvider` callbacks actually fire for built-in `MEMORY.md` writes — a contract that the public Hermes docs leave ambiguous. The spike output drives whether `on_memory_write` is the primary mirror trigger or whether the mtime-watcher inside `sync_turn` is.
+The pre-implementation verification spike was resolved by reading the Hermes v0.14.0 `MemoryProvider` source directly (an editable install was available on the resume host). Per the `verify-before-acting` rule, **source code is the gold standard** over docs and runtime tracing for contract shapes and dispatch wiring. The findings — answers to all 7 spike questions with file:line citations and seven R1–R7 divergences from the docs-based v2 design — are captured in `spike/SPIKE-COMPLETE.md` and were filed back into the openspec capability specs. `on_memory_write` is confirmed to be the primary mirror trigger for built-in `add`/`replace` writes (the built-in `memory` tool guards on `action in {"add","replace"}`, so `remove` flows through the mandatory `sync_turn` mtime-watcher).
 
-Findings are recorded in `docs/specs/2026-05-25-memex-hermes-adapter-design.md` §8.4 and a `spike/SPIKE-COMPLETE.md` file is committed as the visible gate.
+### Maintenance: source-diff on Hermes upgrades
 
-### Maintenance: re-run the spike on Hermes upgrades
+When the upstream Hermes Agent is upgraded across a minor or major version, the `MemoryProvider` ABC contract may shift. The cheapest, most authoritative check is a **source diff** against the verified Hermes v0.14.0 baseline encoded in R1–R7 of `spike/SPIKE-COMPLETE.md`:
 
-When the upstream Hermes Agent is upgraded across a minor or major version (e.g., 1.4 → 1.5, 1.x → 2.0), the `MemoryProvider` contract may change. Before declaring memex-hermes compatible with the new version:
+1. On the upgraded host, point at the new Hermes install (default `/home/<user>/.hermes/hermes-agent/`).
+2. Re-read `agent/memory_provider.py`, `agent/memory_manager.py`, `plugins/memory/__init__.py`, and `agent/agent_init.py` (the four authoritative files cited throughout `spike/SPIKE-COMPLETE.md`).
+3. Diff their signatures and dispatch wiring against R1–R7. Any change → file an openspec change capturing the deltas, re-run `/systems-review` and the impacted unit/integration tests.
+4. If runtime confirmation is desired (e.g., `metadata` dict keys for a real built-in write, optional-hook invocation count across a session), the corrected `spike/trace_provider.py` is still installable per `spike/README.md` against a scratch `$HERMES_HOME`.
 
-1. Re-run `spike/trace_provider.py` against the new Hermes
-2. Commit the trace output as `spike/<version>-trace.log`
-3. Update `docs/specs/2026-05-25-memex-hermes-adapter-design.md` §8.4 if any contract behavior changed
-4. If contract changes ripple into `openspec/changes/...`, file an openspec change capturing the deltas and re-run `/systems-review`
-
-CI's `pre-merge-check` enforces this: PRs that bump the supported Hermes version range without a corresponding `spike/<version>-trace.log` are rejected.
+The runtime trace is now belt-and-suspenders; the source diff is the gate.
 
 ## Working on tasks
 
