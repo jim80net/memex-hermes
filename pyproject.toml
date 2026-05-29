@@ -34,6 +34,13 @@ Issues = "https://github.com/jim80net/memex-hermes/issues"
 [project.entry-points."hermes_agent.plugins"]
 memex = "memex_hermes"
 
+[project.scripts]
+# Materialize step (R1 of hermes-plugin-packaging). Pip install alone
+# does NOT activate the memory provider; the user runs this once to
+# copy the provider files into $HERMES_HOME/plugins/memex/, then sets
+# memory.provider: memex in $HERMES_HOME/config.yaml.
+memex-hermes-install = "memex_hermes.install:main"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
@@ -53,7 +60,18 @@ upstream-release = "memex-hermes@v0.1.0"  # placeholder — bumped to this packa
 
 [tool.hatch.build.targets.wheel]
 packages = ["memex_hermes"]
-include = ["bin/**", "skills/**", "plugin.yaml", "checksums.txt"]
+
+# Ship non-Python distribution assets at the wheel root so the
+# materialize step (`memex-hermes-install`) can locate them via the
+# package parent dir, and so `bin/memex` ships alongside the wheel.
+# `include` alone won't pick up these paths because they are outside
+# the `packages` tree; `force-include` is the documented hatchling
+# mechanism for mapping source -> wheel paths verbatim.
+[tool.hatch.build.targets.wheel.force-include]
+"bin" = "memex_hermes/bin"
+"skills" = "memex_hermes/skills"
+"plugin.yaml" = "memex_hermes/plugin.yaml"
+"checksums.txt" = "memex_hermes/checksums.txt"
 
 [tool.hatch.build.targets.sdist]
 include = [

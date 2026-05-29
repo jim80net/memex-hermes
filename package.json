@@ -24,6 +24,7 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@jim80net/memex-core": "^0.4.0"
   },
   "packageManager": "pnpm@9.15.0"

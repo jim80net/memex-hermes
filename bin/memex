@@ -1,0 +1,44 @@
+#!/bin/sh
+# memex-hermes binary wrapper.
+#
+# Fast path: exec the prebuilt binary with the correct dynamic-loader
+# path so the bundled ONNX runtime shared library is picked up.
+#
+# Slow path (first invocation): call install.sh to fetch the platform's
+# prebuilt binary from the GitHub release pinned in pyproject.toml's
+# [tool.memex-hermes.binary].upstream-release.
+#
+# Failure path: print an install hint to stderr and emit `{}` on stdout
+# so the Python provider sees a safe empty response and degrades
+# gracefully (per the runner.py "Binary missing -> empty mapping" rule).
+set -e
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# 1. Prebuilt binary — fast path
+if [ -f "$DIR/memex.bin" ]; then
+  case "$(uname -s)" in
+    Darwin*) export DYLD_LIBRARY_PATH="$DIR${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" ;;
+    *)       export LD_LIBRARY_PATH="$DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
+  esac
+  exec "$DIR/memex.bin" "$@"
+fi
+
+# Windows: memex.exe runs without an LD path hack.
+if [ -f "$DIR/memex.exe" ]; then
+  exec "$DIR/memex.exe" "$@"
+fi
+
+# 2. Binary missing — synchronous download (fits within hook's 15s timeout)
+if [ -x "$DIR/install.sh" ]; then
+  "$DIR/install.sh" || true
+  # Re-exec if binary was installed successfully
+  if [ -f "$DIR/memex.bin" ] || [ -f "$DIR/memex.exe" ]; then
+    exec "$0" "$@"
+  fi
+fi
+
+# 3. Install failed — clear error with one-liner install command
+echo '{}'
+echo "memex-hermes: binary not found. Install manually:" >&2
+echo "  cd $(cd "$DIR/.." && pwd) && ./bin/install.sh" >&2
