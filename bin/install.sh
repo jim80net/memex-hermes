@@ -93,7 +93,10 @@ download "$URL" "$TMPFILE"
 CHECKSUM_FILE="$(mktemp)"
 trap 'rm -f "$TMPFILE" "$CHECKSUM_FILE"' EXIT
 if download "$CHECKSUM_URL" "$CHECKSUM_FILE" 2>/dev/null; then
-  EXPECTED_HASH="$(grep "  ${ASSET}$" "$CHECKSUM_FILE" | cut -d' ' -f1)"
+  # Exact field match on the asset name. A plain grep would treat the `.` in
+  # `.tar.gz` / `.zip` as a regex wildcard and assume exactly two spaces; awk
+  # comparing the second whitespace-delimited field is literal and robust.
+  EXPECTED_HASH="$(awk -v a="$ASSET" '$2 == a {print $1}' "$CHECKSUM_FILE")"
   if [ -n "$EXPECTED_HASH" ]; then
     if command -v sha256sum >/dev/null 2>&1; then
       ACTUAL_HASH="$(sha256sum "$TMPFILE" | cut -d' ' -f1)"
