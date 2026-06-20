@@ -193,6 +193,58 @@ def test_faf_queue_overflow_drops_oldest_with_warning(
     assert "u3" in contents
 
 
+def _wait_for_envelopes(record: Path, count: int, timeout_s: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline and len(read_envelopes(record)) < count:
+        time.sleep(0.02)
+
+
+def test_shutdown_leaves_runner_reusable_for_faf(tmp_path: Path) -> None:
+    """A fire_and_forget AFTER shutdown must restart the worker and execute.
+
+    Regression for the reset=True session-switch path: ``shutdown`` used to
+    set a process-wide stop flag and never clear it, so the worker exited
+    and every later FAF enqueued into a queue no thread drained — writes
+    silently lost. The runner must be reusable after a bounded drain.
+    """
+    binary, record = fake_binary_paths(tmp_path)
+    write_fake_binary(binary, stdout="{}", record_to=record)
+    runner = _runner(tmp_path, binary=binary)
+
+    runner.fire_and_forget(
+        HERMES_SYNC_TURN, {"user_content": "u0", "assistant_content": "a0"}
+    )
+    _wait_for_envelopes(record, 1)
+    runner.shutdown(timeout_s=2.0)
+
+    # Re-use the SAME runner instance after shutdown.
+    runner.fire_and_forget(
+        HERMES_SYNC_TURN, {"user_content": "u1", "assistant_content": "a1"}
+    )
+    _wait_for_envelopes(record, 2)
+    runner.shutdown(timeout_s=2.0)
+
+    contents = [
+        e["envelope"]["args"]["user_content"]  # type: ignore[index]
+        for e in read_envelopes(record)
+    ]
+    assert "u0" in contents
+    assert "u1" in contents, "fire_and_forget after shutdown must restart the worker"
+
+
+def test_repeated_shutdown_is_idempotent(tmp_path: Path) -> None:
+    """Calling shutdown twice (no worker the second time) must not raise."""
+    binary, record = fake_binary_paths(tmp_path)
+    write_fake_binary(binary, stdout="{}", record_to=record)
+    runner = _runner(tmp_path, binary=binary)
+    runner.fire_and_forget(
+        HERMES_SYNC_TURN, {"user_content": "u", "assistant_content": "a"}
+    )
+    _wait_for_envelopes(record, 1)
+    runner.shutdown(timeout_s=2.0)
+    runner.shutdown(timeout_s=2.0)  # no live worker — must be a clean no-op
+
+
 # ---- await_subprocess (true async) ----------------------------------------
 
 
@@ -221,15 +273,38 @@ def test_binary_path_from_env_var(
     assert read_envelopes(record), "binary indicated by env var must be invoked"
 
 
-def test_default_binary_path_under_hermes_home(tmp_path: Path) -> None:
+def test_cache_binary_takes_precedence_when_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A binary at $HERMES_HOME/cache/memex/bin/memex is used when present."""
+    monkeypatch.delenv(ENV_MEMEX_BINARY, raising=False)
+    home = tmp_path / "hermes"
+    cache_bin = home / "cache" / "memex" / "bin" / "memex"
+    write_fake_binary(cache_bin, stdout="{}")
+    runner = HermesRunner(hermes_home=home)
+    assert runner._resolve_binary() == cache_bin
+
+
+def test_default_resolves_to_packaged_wrapper_when_no_cache_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no override/env/cache binary, resolution lands on the shipped
+    ``bin/memex`` wrapper — a real, existing file — not a path nothing
+    populates.
+
+    Regression for P1-1: the default used to be a cache path the install
+    flow never creates, so every binary call silently degraded to no-op.
+    """
+    monkeypatch.delenv(ENV_MEMEX_BINARY, raising=False)
     home = tmp_path / "hermes"
     home.mkdir()
     runner = HermesRunner(hermes_home=home)
-    # The internal resolver: binary lives at $HERMES_HOME/cache/memex/bin/memex.
-    # We only verify the path it chose, indirectly via a subprocess that fails
-    # to spawn (FileNotFoundError) — the install hint mentions that path.
-    out = runner.run_subprocess_sync(HERMES_HEALTH, {})
-    assert out == {}
+    resolved = runner._resolve_binary()
+    assert resolved.is_file(), (
+        f"default binary resolution must land on an existing wrapper, got {resolved}"
+    )
+    assert resolved.name == "memex"
+    assert resolved.parent.name == "bin"
 
 
 # ---- Sanity: env var name and constants ------------------------------------

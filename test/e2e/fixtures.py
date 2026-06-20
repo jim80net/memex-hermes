@@ -185,8 +185,10 @@ def memex_binary_path(hermes_home: Path) -> MemexBinaryInfo:
       1. ``MEMEX_HERMES_BINARY`` env var (operator override).
       2. ``$HERMES_HOME/cache/memex/bin/memex`` (the §9 dist layout).
 
-    The provider's runner resolves these in the same order
-    (`memex_hermes/runner.py:_resolve_binary`).
+    The provider's runner resolves these in the same order, then adds a
+    final fallback to the shipped ``bin/memex`` wrapper packaged with the
+    wheel (`memex_hermes/runner.py:_resolve_binary`); this fixture only
+    needs a concrete binary to run against, so it stops at the cache path.
     """
     override = os.environ.get("MEMEX_HERMES_BINARY")
     if override:

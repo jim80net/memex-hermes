@@ -290,9 +290,10 @@ class MemexProvider(MemoryProvider):  # type: ignore[misc]
         if runner is None:
             return
         if reset:
-            # Drain accumulated per-session buffers by shutting the
-            # runner's worker thread cleanly. A fresh runner is spawned
-            # on next dispatch via _runner_or_none / __init__-time state.
+            # Drain accumulated per-session buffers by cleanly stopping
+            # the runner's worker thread within a 2s bound. The runner is
+            # left REUSABLE: the fire_and_forget below — and every later
+            # write — re-arms a fresh worker. See HermesRunner.shutdown.
             runner.shutdown(timeout_s=2.0)
         runner.fire_and_forget(
             HERMES_SESSION_SWITCH,

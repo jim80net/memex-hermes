@@ -11,6 +11,7 @@ Covers the seven scenarios named in [`openspec/changes/bootstrap-memex-hermes-ad
 | `test_memory_mirror.py` | §11.4 | Both mirror paths (primary `on_memory_write` + mtime watcher) work; covers `remove` via mtime |
 | `test_first_run.py` | §11.5 | Cold-cache first-run `prefetch` completes within 10s (only when `MEMEX_E2E_COLD=1`) |
 | `test_binary_failure.py` | §11.6 | Provider degrades gracefully when the binary is missing; no exception escapes |
+| `test_binary_resolution.py` | P1-1 | Default binary resolution (no `MEMEX_HERMES_BINARY` override) reaches and runs the cache-path binary |
 | `test_hermes_home.py` | §11.7 | Custom `HERMES_HOME` is honored end-to-end; no writes escape that root |
 
 The Hermes-runtime smoke (`hermes_session` fixture) exists in `fixtures.py` but is reserved for tests that specifically need to drive the real `MemoryManager` discovery path. Most e2e tests instantiate `MemexProvider` directly because the provider is the unit-under-test for these scenarios — the Hermes-side wiring is covered by `spike/SPIKE-COMPLETE.md` and unit tests in `test/python/`.

@@ -49,6 +49,7 @@ import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 from typing import Any, Final
 
@@ -88,6 +89,31 @@ _FAF_QUEUE_CAPACITY: Final[int] = 128
 _DEFAULT_SHUTDOWN_TIMEOUT_S: Final[float] = 5.0
 
 
+def _packaged_wrapper() -> Path | None:
+    """Locate the shipped ``bin/memex`` wrapper, or None if absent.
+
+    Two layouts, probed in order (mirrors ``install.py``'s plugin.yaml
+    resolution):
+
+    * Wheel install: hatch's ``force-include`` maps ``bin`` ->
+      ``memex_hermes/bin``, so the wrapper is at ``<pkg>/bin/memex``.
+    * Editable / source checkout: ``bin/`` lives at the repo root,
+      i.e. the parent of the package directory (``<pkg>/../bin/memex``).
+
+    The wrapper is a ``/bin/sh`` script that execs the prebuilt binary
+    (downloading it on first run) and emits ``{}`` if it cannot, so the
+    runner degrades gracefully either way.
+    """
+    try:
+        pkg_root = Path(str(resources.files("memex_hermes")))
+    except (ModuleNotFoundError, TypeError, OSError):
+        return None
+    for candidate in (pkg_root / "bin" / "memex", pkg_root.parent / "bin" / "memex"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 @dataclass(frozen=True)
 class _FAFJob:
     event_name: HermesEventName
@@ -115,7 +141,12 @@ class HermesRunner:
         self._queue: queue.Queue[_FAFJob] = queue.Queue(maxsize=queue_capacity)
         self._worker: threading.Thread | None = None
         self._worker_started: threading.Event = threading.Event()
-        self._stop_signal: threading.Event = threading.Event()
+        # Each worker owns the stop event it was created with (set on the
+        # instance only for ``shutdown`` to reach the live worker). A
+        # re-armed worker gets a fresh event, so a prior ``shutdown`` can
+        # never stop a later worker. See ``shutdown`` / ``_worker_loop``.
+        self._worker_stop: threading.Event | None = None
+        self._worker_lock: threading.Lock = threading.Lock()
         self._inflight: int = 0
         self._inflight_lock: threading.Lock = threading.Lock()
         self._inflight_drained: threading.Event = threading.Event()
@@ -213,10 +244,19 @@ class HermesRunner:
         * If still pending after the bound, emits a warning identifying
           the canceled action and returns. The worker thread is a
           daemon so the runtime tears it down on process exit.
+
+        The runner is left REUSABLE: this drains and stops the current
+        worker, then re-arms so the next ``fire_and_forget`` starts a
+        fresh worker. This is required by ``on_session_switch(reset=True)``,
+        which drains to flush per-session buffers and then keeps using the
+        same runner. Because each worker owns its own stop event, a worker
+        re-armed after this call can never be stopped by this ``shutdown``.
         """
-        if self._worker is None:
+        worker = self._worker
+        stop = self._worker_stop
+        if worker is None or stop is None:
             return
-        self._stop_signal.set()
+        stop.set()
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             with self._inflight_lock:
@@ -226,8 +266,6 @@ class HermesRunner:
                 break
             # Wait briefly; the worker drains the queue itself.
             time.sleep(0.01)
-        else:  # loop completed without break
-            pass
 
         # Final check: anything left after deadline is canceled.
         remaining: list[_FAFJob] = []
@@ -238,13 +276,12 @@ class HermesRunner:
         except queue.Empty:
             pass
 
-        if remaining:
-            for job in remaining:
-                logger.warning(
-                    "shutdown: canceled pending %s after %.1fs drain bound",
-                    job.event_name,
-                    timeout_s,
-                )
+        for job in remaining:
+            logger.warning(
+                "shutdown: canceled pending %s after %.1fs drain bound",
+                job.event_name,
+                timeout_s,
+            )
         with self._inflight_lock:
             still_inflight = self._inflight
         if still_inflight:
@@ -253,6 +290,17 @@ class HermesRunner:
                 still_inflight,
                 timeout_s,
             )
+
+        # Re-arm. Join the stopped worker (bounded) so it is gone before we
+        # drop the reference, then clear the started latch so the next
+        # ``fire_and_forget`` spins up a fresh worker with a fresh stop
+        # event. A long in-flight job that outlived the drain bound keeps
+        # the old worker alive, but it watches only its OWN (set) stop
+        # event and exits on its own; a re-armed worker is unaffected.
+        worker.join(timeout=min(timeout_s, 0.5))
+        self._worker = None
+        self._worker_stop = None
+        self._worker_started.clear()
 
     # ---- Internal: envelope, dispatch, blocking exec --------------------
 
@@ -281,12 +329,35 @@ class HermesRunner:
         return envelope
 
     def _resolve_binary(self) -> Path:
+        """Resolve the binary the runner execs, in priority order.
+
+        1. Constructor ``binary_path`` override (tests).
+        2. ``MEMEX_HERMES_BINARY`` env var (operator / E2E override).
+        3. ``$HERMES_HOME/cache/memex/bin/memex`` IF it exists — the
+           §9 dist layout / a manual install.
+        4. The shipped ``bin/memex`` wrapper packaged with the wheel
+           (or at the source-checkout repo root). The wrapper execs a
+           prebuilt binary or self-installs it on first run.
+        5. Fallback to the cache path (which does not exist) so the
+           FileNotFoundError path emits an install hint naming the
+           conventional location.
+
+        Prior to step 3/4 the default resolved to the cache path that
+        *nothing in the install flow populates*, so a real install
+        silently degraded to a no-op on every binary call.
+        """
         if self._binary_override is not None:
             return self._binary_override
         env_override = os.environ.get(ENV_MEMEX_BINARY)
         if env_override:
             return Path(env_override)
-        return self._hermes_home / "cache" / "memex" / "bin" / "memex"
+        cache_binary = self._hermes_home / "cache" / "memex" / "bin" / "memex"
+        if cache_binary.exists():
+            return cache_binary
+        wrapper = _packaged_wrapper()
+        if wrapper is not None:
+            return wrapper
+        return cache_binary
 
     def _subprocess_env(self) -> dict[str, str]:
         env = dict(os.environ)
@@ -398,17 +469,19 @@ class HermesRunner:
     def _ensure_worker_running(self) -> None:
         if self._worker_started.is_set():
             return
-        with self._install_hint_lock:
-            # Reuse lock; the actual contention is rare. We just need
-            # one-shot semantics for worker start.
+        with self._worker_lock:
             if self._worker_started.is_set():
                 return
-            self._worker = threading.Thread(
+            stop = threading.Event()
+            worker = threading.Thread(
                 target=self._worker_loop,
+                args=(stop,),
                 name="memex-hermes-runner",
                 daemon=True,
             )
-            self._worker.start()
+            self._worker_stop = stop
+            self._worker = worker
+            worker.start()
             self._worker_started.set()
 
     def _enqueue_with_drop_oldest(self, job: _FAFJob) -> None:
@@ -439,14 +512,16 @@ class HermesRunner:
                 job.event_name,
             )
 
-    def _worker_loop(self) -> None:
-        # Block on get(); the stop_signal alone does not wake a blocked
-        # get() call, so we use a small poll interval to check it.
+    def _worker_loop(self, stop: threading.Event) -> None:
+        # Block on get(); the stop event alone does not wake a blocked
+        # get() call, so we use a small poll interval to check it. Each
+        # worker watches the stop event it was created with, so a worker
+        # re-armed after ``shutdown`` is never stopped by a prior drain.
         while True:
             try:
                 job = self._queue.get(timeout=0.1)
             except queue.Empty:
-                if self._stop_signal.is_set():
+                if stop.is_set():
                     return
                 continue
             try:
