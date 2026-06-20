@@ -1,13 +1,15 @@
 // Hermes.tool-remember — write a memory entry into the project memory dir
 // (NOT MEMORY.md), report `{written, synced}`.
 //
-// `synced` is true only when sync.enabled AND the project ID is not in the
-// `_session/*` namespace. An explicit `projectName` promotes the write into
-// the named project — D7 / memex-tool-surface "Promotion to a named project
-// via memex_remember".
+// `synced` is an ELIGIBILITY prediction — true only when sync.enabled AND the
+// project ID is not in the `_session/*` namespace. NOTE: the entry's commit +
+// push wiring (so an eligible entry actually reaches the remote) is tracked in
+// issue #6; today this handler only writes the file into the sync-repo working
+// tree. An explicit `projectName` promotes the write into the named project —
+// D7 / memex-tool-surface "Promotion to a named project via memex_remember".
 
 import { randomBytes } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import type { Logger } from "@jim80net/memex-core";
 import type { HermesConfig } from "../core/config.ts";
@@ -49,6 +51,11 @@ export async function handleToolRemember(
   // and checking containment catches an escape regardless of the input shape.
   assertWithinSyncRepo(targetDir, paths.syncRepoDir);
   await mkdir(targetDir, { recursive: true });
+  // Lexical containment (above) catches `..`; it cannot catch a SYMLINK in the
+  // path that points outside the repo. Now that the dir exists, realpath both
+  // sides and re-check — refuse to write a file through a symlink escape before
+  // any content is written.
+  await assertRealpathWithinSyncRepo(targetDir, paths.syncRepoDir);
 
   const slug = slugify(extractTitle(args.content));
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
@@ -109,6 +116,22 @@ function assertWithinSyncRepo(targetDir: string, syncRepoDir: string): void {
   if (resolved !== root && !resolved.startsWith(root + sep)) {
     throw new Error(
       `memex_remember: refusing to write outside the sync repo (resolved to ${resolved})`,
+    );
+  }
+}
+
+/**
+ * Symlink-aware containment: resolve symlinks on BOTH the sync-repo root and the
+ * (now-existing) target dir, then re-check containment. A lexical resolve()
+ * cannot detect a symlink in the path that points outside the repo; realpath
+ * can. Called after mkdir so the target exists; throws before any file write.
+ */
+async function assertRealpathWithinSyncRepo(targetDir: string, syncRepoDir: string): Promise<void> {
+  const root = await realpath(syncRepoDir);
+  const real = await realpath(targetDir);
+  if (real !== root && !real.startsWith(root + sep)) {
+    throw new Error(
+      `memex_remember: refusing to write through a symlink outside the sync repo (resolved to ${real})`,
     );
   }
 }

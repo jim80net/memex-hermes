@@ -103,8 +103,8 @@ def _remember_schema() -> dict[str, Any]:
         "name": "memex_remember",
         "description": (
             "Persist a new memory into the user's memex. Writes a markdown "
-            "file with frontmatter and reports whether it synced to the "
-            "configured remote."
+            "file with frontmatter; the `synced` result reports whether the "
+            "entry is eligible to sync to the configured remote."
         ),
         "parameters": {
             "type": "object",

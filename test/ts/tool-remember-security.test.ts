@@ -4,6 +4,7 @@
 // sync repo. A crafted value containing `..` or a separator must be rejected,
 // and no scope branch may ever resolve a write target outside the sync repo.
 
+import { mkdir, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../../src/core/config.ts";
@@ -59,5 +60,19 @@ describe("tool-remember path-traversal hardening", () => {
     } finally {
       resetState();
     }
+  });
+
+  it("backstop rejects a symlink that escapes the sync repo", async () => {
+    // A projectName is a single segment (no separators), but it could name a
+    // pre-existing symlink under projects/ that points outside the repo. The
+    // realpath containment check must catch that even though the lexical check
+    // cannot.
+    const paths = makeFakePaths(await makeTmpRoot());
+    const outside = await makeTmpRoot("hermes-outside-");
+    await mkdir(join(paths.syncRepoDir, "projects"), { recursive: true });
+    await symlink(outside, join(paths.syncRepoDir, "projects", "escape"));
+    await expect(
+      handleToolRemember({ content: "x", projectName: "escape" }, "", DEFAULT_CONFIG, paths),
+    ).rejects.toThrow(/symlink outside the sync repo/);
   });
 });
