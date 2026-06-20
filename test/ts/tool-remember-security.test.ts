@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../../src/core/config.ts";
 import { handleToolRemember } from "../../src/hooks/tool-remember.ts";
+import { resetState, seedFromEnvelope } from "../../src/state.ts";
 import { makeFakePaths, makeTmpRoot } from "./_helpers.ts";
 
 describe("tool-remember path-traversal hardening", () => {
@@ -42,5 +43,21 @@ describe("tool-remember path-traversal hardening", () => {
     );
     const expectedPrefix = join(paths.syncRepoDir, "projects", "my-project", "memory");
     expect(res.written.startsWith(expectedPrefix)).toBe(true);
+  });
+
+  it("backstop rejects a traversal via a crafted session id (session scope)", async () => {
+    // session scope derives the project id from state.sessionId, which is NOT
+    // run through validateProjectName — the resolved-containment backstop is the
+    // line of defense for this vector.
+    const paths = makeFakePaths(await makeTmpRoot());
+    resetState();
+    seedFromEnvelope({ sessionId: "../../../../tmp/evil" });
+    try {
+      await expect(
+        handleToolRemember({ content: "x", scope: "session" }, "", DEFAULT_CONFIG, paths),
+      ).rejects.toThrow(/outside the sync repo/);
+    } finally {
+      resetState();
+    }
   });
 });
