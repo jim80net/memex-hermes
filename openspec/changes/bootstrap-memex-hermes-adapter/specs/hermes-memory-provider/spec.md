@@ -14,18 +14,19 @@ The system SHALL provide a Python class `MemexProvider` in `memex_hermes/provide
 - **WHEN** Hermes reads `provider.name`
 - **THEN** the value is the string `"memex"`
 
-### Requirement: Provider runs every binary invocation off the agent event loop
+### Requirement: Read paths run synchronously; write paths never block the turn thread
 
-The provider SHALL NOT block the calling event loop while a subprocess is in flight. Awaited methods (`prefetch`, `is_available`, `system_prompt_block`, `handle_tool_call`) MUST dispatch the subprocess via `asyncio.to_thread()` or an equivalent off-loop mechanism. Fire-and-forget methods (`sync_turn`, `queue_prefetch`, `on_memory_write`) MUST enqueue work onto a daemon thread with a bounded queue.
+Hermes v0.14.0 invokes `MemoryProvider` methods **synchronously** from the turn thread (`agent/conversation_loop.py:run_conversation` → `agent/memory_manager.py:prefetch_all`/`sync_all` → direct `provider.*`); there is no asyncio event loop driving providers. The provider SHALL NOT stall the turn thread on write paths: fire-and-forget methods (`sync_turn`, `queue_prefetch`, `on_memory_write`, `on_session_switch`) MUST enqueue work onto a daemon thread with a bounded queue and return immediately. Read paths (`prefetch`, `is_available`, `system_prompt_block`, `handle_tool_call`, `on_pre_compress`, `on_session_end`) run the binary synchronously via a short-lived worker thread joined within the per-event timeout, so the timeout is enforced off the calling stack.
 
 #### Scenario: sync_turn returns within 5 ms even when the subprocess takes longer
 - **WHEN** the binary subprocess invoked by `sync_turn(user, assistant)` is artificially slowed to 500 ms
 - **THEN** `provider.sync_turn(...)` returns control to the caller in under 5 ms
-- **AND** the subprocess completes asynchronously on the daemon thread
+- **AND** the subprocess completes on the daemon-thread queue without blocking the turn
 
-#### Scenario: prefetch suspends the calling task but does not block the event loop
-- **WHEN** an asyncio task awaits `provider.prefetch(query)` and the binary takes 100 ms to respond
-- **THEN** other tasks scheduled on the same event loop continue to run during those 100 ms
+#### Scenario: a read-path call returns the binary result and degrades safely on failure
+- **WHEN** `provider.prefetch(query)` invokes the binary and the binary takes 100 ms to respond
+- **THEN** the call returns the parsed `additionalContext` once the binary completes
+- **AND** any binary failure (missing / non-zero exit / timeout / invalid JSON) yields the safe empty default instead of raising
 
 #### Scenario: Daemon-thread queue overflow drops the oldest entry and logs
 - **WHEN** more `sync_turn` invocations are enqueued than the bounded queue capacity within a short window

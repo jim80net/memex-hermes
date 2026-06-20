@@ -1,5 +1,19 @@
 # memex-hermes — Adapter Design
 
+> **ERRATUM (2026-06-20, PR #2 review):** The "all binary invocations run off the
+> agent's event loop / `asyncio.to_thread`" framing in this pre-implementation
+> draft (C10, the C3 diagram, the runner/method tables, F2) is **superseded**.
+> Source-grounding against Hermes v0.14.0 confirmed providers are driven
+> **synchronously** from the turn thread (`agent/conversation_loop.py:run_conversation`
+> → `agent/memory_manager.py:prefetch_all`/`sync_all` → direct `provider.*`); there
+> is no asyncio event loop driving providers. The implementation is correct: read
+> paths run synchronously via `run_subprocess_sync` (bounded worker-thread join),
+> write paths use a daemon-thread bounded queue (`fire_and_forget`) so they never
+> stall the turn. See the corrected **D4** in
+> `openspec/changes/bootstrap-memex-hermes-adapter/design.md` for the authoritative
+> decision record. Wherever this draft says "off the event loop / `asyncio.to_thread`",
+> read "off the turn thread via a worker/daemon thread."
+
 **Status:** Draft v2 (post-systems-review)
 **Date:** 2026-05-25
 **Author:** jim80net (drafted via brainstorming session)

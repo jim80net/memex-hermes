@@ -8,7 +8,7 @@ memex adapter for [Hermes Agent](https://hermes-agent.nousresearch.com/) by Nous
 
 ## Architecture (two source trees)
 
-- **`memex_hermes/`** — Python package. Subclasses Hermes' `MemoryProvider` ABC. Thin shim: translates lifecycle method calls into JSON `HermesHookInput` envelopes for the `memex-hermes` binary. Runs all subprocess work off the agent's event loop (`asyncio.to_thread` for awaited calls, daemon-thread + bounded queue for fire-and-forget).
+- **`memex_hermes/`** — Python package. Subclasses Hermes' `MemoryProvider` ABC. Thin shim: translates lifecycle method calls into JSON `HermesHookInput` envelopes for the `memex-hermes` binary. Hermes v0.14.0 calls provider methods **synchronously** from the turn thread (`agent/conversation_loop.py:run_conversation` → `agent/memory_manager.py:prefetch_all`/`sync_all` → direct `provider.*`; there is no asyncio event loop driving providers). The shim therefore runs read paths on a short-lived worker thread bounded by a join (`run_subprocess_sync`) and write paths (`sync_turn`, `queue_prefetch`, `on_memory_write`) on a daemon-thread bounded queue (`fire_and_forget`) so they return immediately and never block the turn thread.
 - **`src/`** — TypeScript. Implements the `Hermes.*` cases of the `hook_event_name` switch (`src/main.ts`), one handler per event in `src/hooks/`. Compiled via `bun build --compile` into this repo's OWN `memex-hermes` binary (released from `jim80net/memex-hermes`), importing `@jim80net/memex-core` as a library dep.
 
 The Python ↔ binary boundary is a typed JSON envelope encoded in **`src/core/envelope.ts`** (TypeScript) and **`memex_hermes/envelope.py`** (Python TypedDicts). The two are mirrors of each other; drift is a contract bug caught by the type-checker on both sides.
@@ -18,7 +18,7 @@ The Python ↔ binary boundary is a typed JSON envelope encoded in **`src/core/e
 | Invariant | Where enforced |
 |---|---|
 | Python layer never re-implements memex-core | `test/python/test_no_engine_imports.py` (grep test) + `hermes-memory-provider` spec Requirement |
-| All subprocess invocations dispatched off the Hermes event loop | `runner.py` (`asyncio.to_thread` + bounded daemon thread); `test_runner.py` + §8.5 5-ms non-blocking sync_turn test |
+| Write paths never block the turn thread; read paths run synchronously within a bounded join | `runner.py` `fire_and_forget` (daemon-thread bounded queue) for writes, `run_subprocess_sync` for reads; the <5 ms non-blocking `sync_turn` test in `test_provider.py` + `test_runner.py` |
 | `system_prompt_block()` returns static, session-lifetime content | Cached after first call in `provider.py`; `test_provider.py` |
 | `HERMES_HOME` derived from initialize kwargs → save_config arg → env; never hardcoded | `paths.py`; `test_paths.py` no-hardcoded-literal grep |
 | Sessions without a meaningful cwd (`_session/*` project IDs) never push to remote sync | `src/core/sync-helpers.ts:isSessionProjectId`, applied in `src/hooks/_mirror.ts` |
@@ -29,8 +29,8 @@ The Python ↔ binary boundary is a typed JSON envelope encoded in **`src/core/e
 
 ## Critical references
 
-- **Capability specs** (the permanent contract — Requirements + Scenarios for every behavior): `openspec/specs/{hermes-memory-provider,hermes-engine-events,hermes-path-resolution,hermes-sync-bridge,hermes-plugin-packaging,memex-tool-surface}/spec.md`
-- **Archived bootstrap change** (proposal, design with D1–D10 decisions, tasks, the R1–R7 spike findings inventory): `openspec/changes/archive/bootstrap-memex-hermes-adapter/`
+- **Capability specs** (the permanent contract — Requirements + Scenarios for every behavior): `openspec/changes/bootstrap-memex-hermes-adapter/specs/{hermes-memory-provider,hermes-engine-events,hermes-path-resolution,hermes-sync-bridge,hermes-plugin-packaging,memex-tool-surface}/spec.md`. The change is still **active/unpromoted** while PR #2 is open; promotion to `openspec/specs/` + archival of the change happen at merge (tasks.md §14.6).
+- **Bootstrap change** (proposal, design with D1–D10 decisions, tasks, the R1–R7 spike findings inventory): `openspec/changes/bootstrap-memex-hermes-adapter/` (archived to `openspec/changes/archive/` after merge).
 - **User docs**: `README.md` (intro + quickstart), `USAGE.md` (full config + tool + sync reference), `CONTRIBUTING.md` (dev setup + maintenance policy on Hermes upgrades).
 
 ## Development
@@ -77,7 +77,7 @@ All Python code under `memex_hermes/` MUST pass `mypy --strict`. Notable rules (
 
 ## Maintenance: source-diff on Hermes upgrades
 
-When the upstream Hermes Agent is upgraded across a minor or major version, the `MemoryProvider` ABC contract may shift. The cheapest, most authoritative check is a **source diff** against the verified Hermes v0.14.0 baseline (captured in the R1–R7 inventory under `openspec/changes/archive/bootstrap-memex-hermes-adapter/`):
+When the upstream Hermes Agent is upgraded across a minor or major version, the `MemoryProvider` ABC contract may shift. The cheapest, most authoritative check is a **source diff** against the verified Hermes v0.14.0 baseline (captured in the R1–R7 inventory under `openspec/changes/bootstrap-memex-hermes-adapter/`, archived to `openspec/changes/archive/` after merge):
 
 1. On the upgraded host, read `agent/memory_provider.py`, `agent/memory_manager.py`, `plugins/memory/__init__.py`, and `agent/agent_init.py` from the live Hermes install.
 2. Diff their signatures and dispatch wiring against the R1–R7 baseline.

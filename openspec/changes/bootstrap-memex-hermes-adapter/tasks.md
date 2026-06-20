@@ -1,3 +1,14 @@
+> **STATUS (PR #2, 2026-06-20):** §1–§13 are IMPLEMENTED — the code, tests, and
+> green CI exist on branch `feat/implement-memex-hermes-adapter` (PR #2); the
+> unchecked boxes below reflect the ORIGINAL PLAN and were not maintained during
+> implementation, so read the PR diff / commit history for actual completion, not
+> the checkboxes. Known DEFERRED / still-open items, tracked as follow-ups (NOT
+> done): §11.1 dockerized E2E harness; §11.3 cross-adapter round-trip golden
+> fixture (issue #4); the prefetch-latency measurement against the 200 ms budget
+> (§14 / design success criterion, issue #3); the double-mirror-work cleanup
+> (issue #5); and §14.6 post-merge spec promotion + archival. The §14
+> verification gates (systems-review / OCR / STORM + CI) run on PR #2.
+
 ## 1. Repository scaffolding
 
 - [x] 1.1 Add `pyproject.toml` with `memex-hermes` package metadata, Python ≥ 3.10, dev dependencies (pytest, pyyaml, jsonschema), and `[project.entry-points."hermes_agent.plugins"]` entry `memex = "memex_hermes"` (NOTE per R1: this entry-point is inventory-only for `hermes plugins list`; it does NOT activate a memory provider — activation requires the provider dir at `$HERMES_HOME/plugins/memex/` + `memory.provider: memex` config. See §9.6.)
@@ -24,8 +35,6 @@ Resolved by reading the Hermes v0.14.0 source directly (an editable install was 
 ## 3. TypeScript engine extension — paths and configuration
 
 **Blocked by: §2. Do not start §3 until `spike/SPIKE-COMPLETE.md` exists.**
-
-## 3. TypeScript engine extension — paths and configuration
 
 - [ ] 3.1 Implement `src/core/hermes-paths.ts` reading `MEMEX_HERMES_HOME` env var and resolving the documented paths (`skills/`, `memories/`, `cache/memex/`, `memex.json`, `config.yaml`)
 - [ ] 3.2 Implement `src/core/config.ts` that loads `$MEMEX_HERMES_HOME/memex.json`, merges with defaults, and exposes the `prefetch`, `tools`, `sync`, `sessionEnd`, `mirrorHermesMemory` config sections matching the design §7 schema
