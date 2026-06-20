@@ -114,6 +114,25 @@ export async function pushWithRetry(
   return { pushed: false, attempts: maxAttempts, reason: lastReason };
 }
 
+/**
+ * Resolve the current branch name of a git repo. Falls back to "main" on any
+ * error or detached HEAD so the push step always has a branch to target.
+ * Shared by the mirror path and the session-end push so both push the branch
+ * the repo is actually on.
+ */
+export async function detectBranch(repoDir: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: repoDir,
+      timeout: 5_000,
+    });
+    const branch = stdout.trim();
+    return branch.length > 0 && branch !== "HEAD" ? branch : "main";
+  } catch {
+    return "main";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Private
 // ---------------------------------------------------------------------------

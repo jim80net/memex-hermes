@@ -126,6 +126,31 @@ def test_sync_repo_local_path_override_used(tmp_path: Path) -> None:
     assert p.sync_repo_dir(str(local)) == local
 
 
+# P2-4 — these cases are mirrored field-for-field by the TS suite
+# (test/ts/hermes-paths.test.ts "resolveSyncRepoDir — local-path classification
+# + expansion") to pin the cross-language contract: a `sync.repo` value must
+# classify as local-vs-URL and expand to the SAME path on both sides, or the
+# Python and TS checkouts diverge.
+def test_sync_repo_path_classification_and_expansion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", "/home/tester")
+    monkeypatch.setenv("MY_ROOT", "/srv/custom")
+    p = HermesPaths(home=tmp_path / "hermes")
+    default = Path("/home/tester") / ".local" / "share" / "memex-hermes"
+
+    # Local paths expand identically to the TS expandPath.
+    assert p.sync_repo_dir("$HOME/repo") == Path("/home/tester/repo")
+    assert p.sync_repo_dir("${MY_ROOT}/x") == Path("/srv/custom/x")
+    assert p.sync_repo_dir("~/repo") == Path("/home/tester/repo")
+    assert p.sync_repo_dir("/abs") == Path("/abs")
+    assert p.sync_repo_dir("./rel") == Path("./rel")
+
+    # Git URLs are NOT local — both sides fall back to the default checkout dir.
+    assert p.sync_repo_dir("git@github.com:o/r.git") == default
+    assert p.sync_repo_dir("https://github.com/o/r.git") == default
+
+
 # --- parse_external_dirs ----------------------------------------------------
 
 

@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applySyncRepoOverride,
   getHermesPaths,
@@ -42,6 +42,35 @@ describe("resolveHermesHome", () => {
 
   it("falls back to ~/.hermes only when neither arg nor env is set", () => {
     expect(resolveHermesHome()).toBe(join(homedir(), ".hermes"));
+  });
+
+  // P3-5 — the fallback must be NON-SILENT (the Python side raises; the binary
+  // warns + defaults so a standalone run works but a mis-wired provider call is
+  // still visible in stderr).
+  it("emits a stderr warning on fallback, and none when a home is provided", () => {
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    try {
+      // No arg, no env → fallback → warning.
+      resolveHermesHome();
+      expect(writes.some((w) => w.includes("HERMES_HOME unresolved"))).toBe(true);
+
+      // Explicit argument → resolved → no new warning.
+      const before = writes.length;
+      resolveHermesHome("/data/hermes");
+      expect(writes.length).toBe(before);
+
+      // Env var set → resolved → no new warning.
+      process.env.MEMEX_HERMES_HOME = "/env/hermes";
+      const before2 = writes.length;
+      resolveHermesHome();
+      expect(writes.length).toBe(before2);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
@@ -118,6 +147,57 @@ describe("resolveSyncRepoDir — sync.repo override", () => {
     expect(resolveSyncRepoDir("git@github.com:jim80net/memex-sync.git")).toBe(
       join(homedir(), ".local", "share", "memex-hermes"),
     );
+  });
+});
+
+// P2-4 — the TS sync.repo classification + expansion must match the Python
+// `_is_local_path` / `_expand` (paths.py), or a `$HOME/repo` override resolves
+// to a local checkout on one side and the default on the other. These cases are
+// mirrored field-for-field by test/python/test_paths.py::test_sync_repo_path_*
+// to pin the cross-language contract.
+describe("resolveSyncRepoDir — local-path classification + expansion (P2-4, mirrors Python)", () => {
+  const ENV = ["HOME", "MY_ROOT"] as const;
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const k of ENV) saved[k] = process.env[k];
+    process.env.HOME = "/home/tester";
+    process.env.MY_ROOT = "/srv/custom";
+  });
+  afterEach(() => {
+    for (const k of ENV) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  const DEFAULT = () => join(homedir(), ".local", "share", "memex-hermes");
+
+  it("$HOME/repo → expanded local path", () => {
+    expect(resolveSyncRepoDir("$HOME/repo")).toBe("/home/tester/repo");
+  });
+
+  it("${MY_ROOT}/x → expanded local path", () => {
+    expect(resolveSyncRepoDir("${MY_ROOT}/x")).toBe("/srv/custom/x");
+  });
+
+  it("~/repo → expanded under homedir", () => {
+    expect(resolveSyncRepoDir("~/repo")).toBe(join(homedir(), "repo"));
+  });
+
+  it("/abs → unchanged local path", () => {
+    expect(resolveSyncRepoDir("/abs")).toBe("/abs");
+  });
+
+  it("./rel → unchanged local path", () => {
+    expect(resolveSyncRepoDir("./rel")).toBe("./rel");
+  });
+
+  it("git@github.com:o/r.git → URL, falls back to default", () => {
+    expect(resolveSyncRepoDir("git@github.com:o/r.git")).toBe(DEFAULT());
+  });
+
+  it("https://github.com/o/r.git → URL, falls back to default", () => {
+    expect(resolveSyncRepoDir("https://github.com/o/r.git")).toBe(DEFAULT());
   });
 });
 

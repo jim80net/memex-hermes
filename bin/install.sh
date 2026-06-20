@@ -41,6 +41,19 @@ detect_platform() {
 PLATFORM="$(detect_platform)"
 echo "Detected platform: $PLATFORM" >&2
 
+# Only the platforms the release CI actually builds have published binaries.
+# Keep this list in lockstep with build.ts PLATFORMS and the release-please.yml
+# `build` matrix. darwin-x64 (Intel Mac) and win32-arm64 are NOT built yet, so
+# we fail fast with a clear message instead of 404-ing on a missing asset.
+case "$PLATFORM" in
+  linux-x64|linux-arm64|darwin-arm64|win32-x64) ;;
+  *)
+    echo "Unsupported platform: $PLATFORM. Prebuilt binaries are published for" \
+         "linux-x64, linux-arm64, darwin-arm64, win32-x64." >&2
+    exit 1
+    ;;
+esac
+
 if [ "$PLATFORM_OS" = "win32" ]; then
   ASSET="memex-hermes-${PLATFORM}.zip"
 else

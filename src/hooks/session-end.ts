@@ -17,7 +17,13 @@ import { initSyncRepo } from "@jim80net/memex-core";
 import type { HermesConfig } from "../core/config.ts";
 import type { HermesSessionEndArgs, HermesSessionEndOutput } from "../core/envelope.ts";
 import type { HermesPaths } from "../core/hermes-paths.ts";
-import { resolveHermesProjectId } from "../core/sync-helpers.ts";
+import {
+  detectBranch,
+  isSessionProjectId,
+  pushWithRetry,
+  resolveHermesProjectId,
+} from "../core/sync-helpers.ts";
+import { safeYamlScalar } from "../core/yaml-frontmatter.ts";
 import { getState } from "../state.ts";
 
 const execFileAsync = promisify(execFile);
@@ -35,7 +41,7 @@ interface ChatCompletionResponse {
   choices?: Array<{ message?: { content?: string } }>;
 }
 
-interface ExtractedLearning {
+export interface ExtractedLearning {
   name: string;
   description: string;
   body: string;
@@ -87,6 +93,7 @@ export async function handleSessionEnd(
   }
 
   if (written > 0 && config.sync.enabled && config.sync.repo.length > 0) {
+    let committed = false;
     try {
       await initSyncRepo(config.sync, paths.syncRepoDir);
       await runGit(["add", `projects/${projectId}/memory`], paths.syncRepoDir);
@@ -98,8 +105,29 @@ export async function handleSessionEnd(
         ],
         paths.syncRepoDir,
       );
+      committed = true;
     } catch (err) {
       logger?.warn(`memex-hermes[session-end]: commit failed: ${errMsg(err)}`);
+    }
+
+    // Push the learnings to the remote. Without this they sat in the local
+    // sync repo forever: the next sync-turn mtime-watcher only watches
+    // MEMORY.md / USER.md, so session-learning-*.md never reached origin. Push
+    // is suppressed for `_session/*` project IDs (D7 / C12) and gated on
+    // autoCommitPush, mirroring the memory-write/mtime mirror path. Reuses the
+    // shared rebase-retry + no-force-push helper.
+    if (committed && config.sync.autoCommitPush && !isSessionProjectId(projectId)) {
+      try {
+        const branch = await detectBranch(paths.syncRepoDir);
+        await pushWithRetry(
+          paths.syncRepoDir,
+          branch,
+          { pushRetries: config.sync.pushRetries, baseBackoffMs: 200 },
+          logger,
+        );
+      } catch (err) {
+        logger?.warn(`memex-hermes[session-end]: push failed: ${errMsg(err)}`);
+      }
     }
   }
 
@@ -195,11 +223,15 @@ async function extractLearnings(
   }
 }
 
-function formatLearningFile(learning: ExtractedLearning): string {
+// Exported for unit testing: the YAML-frontmatter formatting is the security-
+// relevant seam (LLM-provided name/description must not corrupt the file).
+export function formatLearningFile(learning: ExtractedLearning): string {
+  // name/description are LLM-provided — a colon, quote, or newline would corrupt
+  // the YAML frontmatter, so emit them as escaped double-quoted scalars.
   return [
     "---",
-    `name: ${learning.name}`,
-    `description: ${learning.description}`,
+    `name: ${safeYamlScalar(learning.name)}`,
+    `description: ${safeYamlScalar(learning.description)}`,
     "type: session-learning",
     "---",
     "",

@@ -144,6 +144,14 @@ def resolve_hermes_home(
     inventing the default, because in the live runtime the framework always
     injects the value and a missing one signals a wiring bug we must surface,
     not paper over.
+
+    INTENTIONAL ASYMMETRY with the TS ``resolveHermesHome``
+    (``src/core/hermes-paths.ts``), which WARNS and falls back to the default
+    Hermes home instead of raising. The provider must surface a wiring bug (it
+    raises); the binary is also a standalone CLI that someone may run directly
+    without the provider, so it degrades to the default rather than
+    hard-failing — but it warns so the fallback is never silent. Do NOT "align"
+    these by making the binary raise: that would break standalone invocation.
     """
     candidate = _kwargs_home(initialize_kwargs)
     if candidate is None and save_config_arg:

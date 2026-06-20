@@ -58,6 +58,14 @@ interface PlatformFiles {
   binaryName: string;
 }
 
+// The DECLARED targets MUST match what the release CI actually builds
+// (.github/workflows/release-please.yml `build` matrix) and what
+// bin/install.sh advertises — otherwise a declared-but-unbuilt target 404s on
+// install. The release matrix currently builds four targets; darwin-x64 (Intel
+// Mac) and win32-arm64 are deliberately omitted here until the CI matrix builds
+// them (they need a macos-13 Intel runner and a Windows-arm64 runner). To
+// re-add: restore the entry below AND add the matching matrix include in
+// release-please.yml AND the platform case in bin/install.sh.
 const PLATFORMS: Record<string, PlatformFiles> = {
   "linux-x64": {
     onnxDir: join(ONNX_BASE, "linux/x64"),
@@ -69,11 +77,6 @@ const PLATFORMS: Record<string, PlatformFiles> = {
     sharedLibs: ["libonnxruntime.so.1"],
     binaryName: "memex-hermes",
   },
-  "darwin-x64": {
-    onnxDir: join(ONNX_BASE, "darwin/x64"),
-    sharedLibs: ["libonnxruntime.1.21.0.dylib"],
-    binaryName: "memex-hermes",
-  },
   "darwin-arm64": {
     onnxDir: join(ONNX_BASE, "darwin/arm64"),
     sharedLibs: ["libonnxruntime.1.21.0.dylib"],
@@ -81,11 +84,6 @@ const PLATFORMS: Record<string, PlatformFiles> = {
   },
   "win32-x64": {
     onnxDir: join(ONNX_BASE, "win32/x64"),
-    sharedLibs: ["onnxruntime.dll", "DirectML.dll"],
-    binaryName: "memex-hermes.exe",
-  },
-  "win32-arm64": {
-    onnxDir: join(ONNX_BASE, "win32/arm64"),
     sharedLibs: ["onnxruntime.dll", "DirectML.dll"],
     binaryName: "memex-hermes.exe",
   },
@@ -110,7 +108,15 @@ function parseBunTarget(target: string): string {
     process.exit(1);
   }
   const os = match[1] === "windows" ? "win32" : match[1];
-  return `${os}-${match[2]}`;
+  const key = `${os}-${match[2]}`;
+  if (!(key in PLATFORMS)) {
+    console.error(
+      `Unsupported target: ${target} (${key}). Supported: ${Object.keys(PLATFORMS).join(", ")}. ` +
+        `darwin-x64 / win32-arm64 are not built until the release CI matrix adds them.`,
+    );
+    process.exit(1);
+  }
+  return key;
 }
 
 // Parse args

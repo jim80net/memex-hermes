@@ -63,6 +63,32 @@ export function captureInit(args: {
   STATE.hermesHome = args.hermesHome;
 }
 
+/**
+ * Seed per-invocation context from the dispatch envelope. The binary is
+ * single-shot, so `captureInit` only ran in the separate `Hermes.init`
+ * subprocess; every OTHER event (memory-write, sync-turn, session-end,
+ * tool-remember) lands in a fresh process where STATE is empty. Without this
+ * seed those handlers would read sessionId="" / agentContext="primary" on
+ * every call, defeating the per-write suppression gate and dropping the
+ * session id from mirror commits.
+ *
+ * The envelope carries the session id at the top level on every event; the
+ * agent_context rides in the event args when the Python provider forwards it
+ * (write events only). A missing agent_context leaves the default "primary"
+ * untouched so read events behave as before.
+ */
+export function seedFromEnvelope(args: {
+  sessionId?: string;
+  agentContext?: HermesAgentContext;
+}): void {
+  if (args.sessionId !== undefined && args.sessionId.length > 0) {
+    STATE.sessionId = args.sessionId;
+  }
+  if (args.agentContext !== undefined) {
+    STATE.agentContext = args.agentContext;
+  }
+}
+
 export function setSessionId(sessionId: string, reset: boolean): void {
   STATE.sessionId = sessionId;
   if (reset) {

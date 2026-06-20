@@ -195,7 +195,11 @@ class MemexProvider(MemoryProvider):  # type: ignore[misc]
             return
         runner.fire_and_forget(
             HERMES_QUEUE_PREFETCH,
-            {"query": query, "session_id": session_id or self._session_id},
+            {
+                "query": query,
+                "session_id": session_id or self._session_id,
+                "agent_context": self._agent_context,
+            },
             session_id=session_id or self._session_id or None,
         )
 
@@ -219,6 +223,7 @@ class MemexProvider(MemoryProvider):  # type: ignore[misc]
                 "user_content": user_content,
                 "assistant_content": assistant_content,
                 "session_id": session_id or self._session_id,
+                "agent_context": self._agent_context,
             },
             session_id=session_id or self._session_id or None,
         )
@@ -263,7 +268,12 @@ class MemexProvider(MemoryProvider):  # type: ignore[misc]
         runner = self._runner_or_none()
         if runner is None:
             return
-        args: dict[str, Any] = {"action": action, "target": target, "content": content}
+        args: dict[str, Any] = {
+            "action": action,
+            "target": target,
+            "content": content,
+            "agent_context": self._agent_context,
+        }
         if metadata is not None:
             args["metadata"] = dict(metadata)
         runner.fire_and_forget(

@@ -41,12 +41,28 @@ export type HermesPaths = MemexPaths & {
  *
  * The literal `~/.hermes` only appears here as the final fallback; every
  * caller derives from the resolved value, never from a hardcoded string.
+ *
+ * INTENTIONAL ASYMMETRY with the Python `resolve_hermes_home` (paths.py), which
+ * RAISES when no source supplies a value. The two layers serve different
+ * runtimes: the Python provider always has MEMEX_HERMES_HOME injected by the
+ * runner (runner.py `_subprocess_env`), so a missing value there is a WIRING
+ * BUG worth surfacing loudly — it raises. The binary, by contrast, is also a
+ * standalone CLI (someone may run it directly without the provider), so it must
+ * NOT hard-fail; it warns and falls back to the default. The warning makes the
+ * fallback non-silent so a mis-wired provider invocation is still visible in
+ * the binary's stderr rather than degrading invisibly.
  */
 export function resolveHermesHome(hermesHome?: string): string {
   if (hermesHome && hermesHome.length > 0) return hermesHome;
   const fromEnv = process.env.MEMEX_HERMES_HOME;
   if (fromEnv && fromEnv.length > 0) return fromEnv;
-  return join(homedir(), ".hermes");
+  const fallback = join(homedir(), ".hermes");
+  process.stderr.write(
+    `memex-hermes[warn]: HERMES_HOME unresolved (no argument, no MEMEX_HERMES_HOME); ` +
+      `falling back to ${fallback}. Under the Python provider this signals a wiring ` +
+      `bug — the runner always injects MEMEX_HERMES_HOME.\n`,
+  );
+  return fallback;
 }
 
 /**
@@ -102,7 +118,7 @@ export function getProjectMemoryDir(cwd: string, projectsDir: string): string {
  * `syncRepo`; empty / URL values fall back to the default.
  */
 export function resolveSyncRepoDir(syncRepo?: string): string {
-  if (syncRepo && isLocalPath(syncRepo)) return syncRepo;
+  if (syncRepo && isLocalPath(syncRepo)) return expandPath(syncRepo);
   return defaultSyncRepoDir();
 }
 
@@ -124,8 +140,11 @@ export function applySyncRepoOverride(
   // both empty and URL to the default; that's correct for cold resolution but
   // would be a surprise for an override on top of a base).
   if (!syncConfig?.repo || !isLocalPath(syncConfig.repo)) return base;
-  if (syncConfig.repo === base.syncRepoDir) return base;
-  return { ...base, syncRepoDir: syncConfig.repo };
+  // Compare and store the EXPANDED path so `~`/`$VAR`/`${VAR}` overrides resolve
+  // to the same checkout the Python side computes (paths.py `_expand`).
+  const expanded = expandPath(syncConfig.repo);
+  if (expanded === base.syncRepoDir) return base;
+  return { ...base, syncRepoDir: expanded };
 }
 
 /**
@@ -155,6 +174,45 @@ function defaultSyncRepoDir(): string {
   return join(homedir(), ".local", "share", "memex-hermes");
 }
 
+/**
+ * Heuristic mirror of the Python `_is_local_path` (paths.py): a `sync.repo`
+ * value is a local filesystem path (not a git URL) when it starts with `/`,
+ * `~`, `.`, or `$` (the last covers `$HOME/repo` / `${VAR}/repo` before
+ * expansion). A git URL (`scheme://...` or scp-form `user@host:path`) is NOT
+ * local. Both sides must classify identically or the checkout location drifts.
+ */
 function isLocalPath(candidate: string): boolean {
-  return candidate.startsWith("/") || candidate.startsWith("~") || candidate.startsWith(".");
+  return (
+    candidate.startsWith("/") ||
+    candidate.startsWith("~") ||
+    candidate.startsWith(".") ||
+    candidate.startsWith("$")
+  );
+}
+
+/**
+ * Expand `${VAR}` / `$VAR` then `~` in a local path, mirroring the Python
+ * `_expand` (paths.py): `os.path.expanduser(os.path.expandvars(value))`. Env
+ * vars come from `process.env`; `~` / `~/` resolves to `os.homedir()`. Unknown
+ * `$VAR` references are left verbatim (same as Python's expandvars).
+ */
+function expandPath(value: string): string {
+  const withVars = expandVars(value);
+  return expandTilde(withVars);
+}
+
+function expandVars(value: string): string {
+  // ${VAR} and $VAR (alnum + underscore). Leave unknown vars untouched, exactly
+  // as os.path.expandvars does, so behavior matches the Python side.
+  return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (m, a, b) => {
+    const name = a ?? b;
+    const resolved = process.env[name];
+    return resolved === undefined ? m : resolved;
+  });
+}
+
+function expandTilde(value: string): string {
+  if (value === "~") return homedir();
+  if (value.startsWith("~/")) return join(homedir(), value.slice(2));
+  return value;
 }

@@ -18,6 +18,7 @@ import type {
 } from "../core/envelope.ts";
 import type { HermesPaths } from "../core/hermes-paths.ts";
 import { isSessionProjectId, resolveHermesProjectId } from "../core/sync-helpers.ts";
+import { safeYamlScalar } from "../core/yaml-frontmatter.ts";
 import { getState } from "../state.ts";
 
 export async function handleToolRemember(
@@ -109,10 +110,13 @@ async function resolveTargetDir(
 function formatMemory(content: string): string {
   const name = slugify(extractTitle(content));
   const description = extractDescription(content);
+  // name is slug-safe ([a-z0-9-]), but description is the first content line and
+  // may carry a colon/quote that would corrupt the frontmatter — emit both as
+  // escaped double-quoted YAML scalars for a single, consistent safe path.
   return [
     "---",
-    `name: ${name}`,
-    `description: ${description}`,
+    `name: ${safeYamlScalar(name)}`,
+    `description: ${safeYamlScalar(description)}`,
     "type: memory",
     "---",
     "",

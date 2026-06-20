@@ -98,12 +98,18 @@ class HermesPrefetchArgs(TypedDict):
 class HermesQueuePrefetchArgs(TypedDict):
     query: str
     session_id: NotRequired[str]
+    # Forwarded so the binary's suppression gate has a live agent_context
+    # (captureInit only runs in the separate Hermes.init subprocess). Mirror of
+    # the TS interface.
+    agent_context: NotRequired[HermesAgentContext]
 
 
 class HermesSyncTurnArgs(TypedDict):
     user_content: str
     assistant_content: str
     session_id: NotRequired[str]
+    # See HermesQueuePrefetchArgs.agent_context — same cross-process gate signal.
+    agent_context: NotRequired[HermesAgentContext]
 
 
 class HermesSessionEndArgs(TypedDict):
@@ -119,6 +125,10 @@ class HermesMemoryWriteArgs(TypedDict):
     target: HermesMemoryTarget
     content: str
     metadata: NotRequired[Mapping[str, Any]]
+    # Forwarded so the binary's agent_context suppression gate has a live signal
+    # across the subprocess boundary (defense-in-depth; the provider already
+    # suppresses non-primary writes before calling the binary). Mirror of TS.
+    agent_context: NotRequired[HermesAgentContext]
 
 
 class HermesSessionSwitchArgs(TypedDict):

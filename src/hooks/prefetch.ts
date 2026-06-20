@@ -17,6 +17,7 @@ import type { Logger, SkillIndex } from "@jim80net/memex-core";
 import type { HermesConfig } from "../core/config.ts";
 import type { HermesPrefetchArgs, HermesPrefetchOutput } from "../core/envelope.ts";
 import type { HermesPaths } from "../core/hermes-paths.ts";
+import { savePrefetchInjections } from "../core/prefetch-injections.ts";
 import { hasRuleBeenShown, loadSession, markRuleShown, saveSession } from "../core/session.ts";
 import { recordPrefetchInjections } from "../state.ts";
 
@@ -96,8 +97,15 @@ export async function handlePrefetch(
   }
 
   // Sync-turn picks these up to attribute telemetry once the model has
-  // observed the injection.
+  // observed the injection. The in-process record serves single-process test
+  // harnesses; the disk handoff is what actually survives to the next
+  // (separate) sync-turn subprocess in production.
   recordPrefetchInjections(injected);
+  try {
+    await savePrefetchInjections(sid, paths.cacheDir, injected);
+  } catch (err) {
+    logger?.warn(`memex-hermes[prefetch]: injection persist failed: ${errMsg(err)}`);
+  }
 
   if (sections.length === 0) return {};
 

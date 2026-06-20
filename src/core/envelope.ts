@@ -63,12 +63,18 @@ export interface HermesPrefetchArgs {
 export interface HermesQueuePrefetchArgs {
   query: string;
   session_id?: string;
+  // Forwarded by the Python provider on write events so the binary's
+  // suppression gate has a live agent_context (captureInit only runs in the
+  // separate Hermes.init subprocess). Mirror of the Python TypedDict.
+  agent_context?: HermesAgentContext;
 }
 
 export interface HermesSyncTurnArgs {
   user_content: string;
   assistant_content: string;
   session_id?: string;
+  // See HermesQueuePrefetchArgs.agent_context — same cross-process gate signal.
+  agent_context?: HermesAgentContext;
 }
 
 export interface HermesSessionEndArgs {
@@ -89,6 +95,11 @@ export interface HermesMemoryWriteArgs {
   // Provenance dict from Hermes. Common keys: write_origin, execution_context,
   // session_id, parent_session_id, platform, tool_name. Unknown keys tolerated.
   metadata?: Readonly<Record<string, unknown>>;
+  // Forwarded by the Python provider so the binary's agent_context suppression
+  // gate (memory-write.ts) has a live signal across the subprocess boundary.
+  // Defense-in-depth: the provider already suppresses non-primary writes before
+  // calling the binary. Mirror of the Python TypedDict.
+  agent_context?: HermesAgentContext;
 }
 
 export interface HermesSessionSwitchArgs {

@@ -27,6 +27,7 @@ import type { HermesConfig } from "./core/config.ts";
 import { loadConfig } from "./core/config.ts";
 import {
   HERMES_EVENTS,
+  type HermesAgentContext,
   type HermesEventName,
   type HermesHookInput,
   type HermesMemoryWriteArgs,
@@ -62,6 +63,7 @@ import { handleSystemPrompt } from "./hooks/system-prompt.ts";
 import { handleToolRecall } from "./hooks/tool-recall.ts";
 import { handleToolRemember } from "./hooks/tool-remember.ts";
 import { handleToolSearch } from "./hooks/tool-search.ts";
+import { seedFromEnvelope } from "./state.ts";
 
 // ---------------------------------------------------------------------------
 // Public — entry
@@ -81,6 +83,13 @@ export async function dispatch(
   const cwd = input.cwd ?? "";
   const sessionId = input.session_id ?? "";
   const logger = options.logger ?? defaultLogger();
+
+  // Seed per-invocation context BEFORE dispatch. The binary is single-shot, so
+  // captureInit only ran in the separate Hermes.init subprocess; without this,
+  // every other event reads a stale empty STATE (sessionId="", context default
+  // "primary"). The session id is a top-level envelope field; agent_context
+  // rides in the args of write events when the Python provider forwards it.
+  seedFromEnvelope({ sessionId, agentContext: readAgentContext(input.args) });
 
   const { provider, index } = await getIndex(config, paths, cwd, options);
 
@@ -288,6 +297,20 @@ async function buildScanDirs(
   }
 
   return scanDirs;
+}
+
+// Narrow the optional agent_context carried in a write event's args. The Python
+// provider forwards it on memory-write / sync-turn / queue-prefetch envelopes so
+// the binary's suppression gate has a live signal even though captureInit only
+// ran in the separate init subprocess. Any other event (or a missing field)
+// returns undefined, leaving STATE.agentContext at its default.
+function readAgentContext(args: unknown): HermesAgentContext | undefined {
+  if (typeof args !== "object" || args === null) return undefined;
+  const raw = (args as { agent_context?: unknown }).agent_context;
+  if (raw === "primary" || raw === "subagent" || raw === "cron" || raw === "flush") {
+    return raw;
+  }
+  return undefined;
 }
 
 function defaultLogger(): Logger {

@@ -22,7 +22,8 @@ import type {
 } from "../core/envelope.ts";
 import type { HermesPaths } from "../core/hermes-paths.ts";
 import { loadMemoryMtimes, saveMemoryMtimes } from "../core/memory-mtimes.ts";
-import { getState, takePrefetchInjections } from "../state.ts";
+import { takePersistedPrefetchInjections } from "../core/prefetch-injections.ts";
+import { getState, type PrefetchInjection, takePrefetchInjections } from "../state.ts";
 import { mirrorAndCommit } from "./_mirror.ts";
 
 export async function handleSyncTurn(
@@ -35,7 +36,7 @@ export async function handleSyncTurn(
   const state = getState();
   const sid = args?.session_id ?? state.sessionId;
 
-  await flushPrefetchTelemetry(sid, paths.telemetryPath, logger);
+  await flushPrefetchTelemetry(sid, paths, logger);
 
   const mirrored = await runMtimeWatcher(cwd, sid, config, paths, logger);
 
@@ -48,12 +49,29 @@ export async function handleSyncTurn(
 
 async function flushPrefetchTelemetry(
   sessionId: string,
-  telemetryPath: string,
+  paths: HermesPaths,
   logger?: Logger,
 ): Promise<void> {
-  const injections = takePrefetchInjections();
-  if (injections.length === 0 || sessionId.length === 0) return;
+  if (sessionId.length === 0) return;
 
+  // The disk handoff is the production source: prefetch ran in a separate
+  // subprocess, so its in-process buffer never survives to here. The persisted
+  // set is take-once (loaded + deleted) so a later turn can't double-count.
+  // We always drain the in-process buffer too — to clear it in single-process
+  // test harnesses — but the persisted set takes precedence when present so
+  // those harnesses (which set BOTH) attribute each injection exactly once.
+  let injections: PrefetchInjection[];
+  try {
+    injections = await takePersistedPrefetchInjections(sessionId, paths.cacheDir);
+  } catch (err) {
+    logger?.warn(`memex-hermes[sync-turn]: injection load failed: ${errMsg(err)}`);
+    injections = [];
+  }
+  const inProcess = takePrefetchInjections();
+  if (injections.length === 0) injections = inProcess;
+  if (injections.length === 0) return;
+
+  const telemetryPath = paths.telemetryPath;
   try {
     await mkdir(dirname(telemetryPath), { recursive: true });
     await withFileLock(telemetryPath, async () => {

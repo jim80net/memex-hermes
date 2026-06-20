@@ -11,7 +11,12 @@ import type { Logger, SyncConfig } from "@jim80net/memex-core";
 import { initSyncRepo } from "@jim80net/memex-core";
 import type { HermesConfig } from "../core/config.ts";
 import type { HermesMemoryTarget } from "../core/envelope.ts";
-import { isSessionProjectId, pushWithRetry, resolveHermesProjectId } from "../core/sync-helpers.ts";
+import {
+  detectBranch,
+  isSessionProjectId,
+  pushWithRetry,
+  resolveHermesProjectId,
+} from "../core/sync-helpers.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -123,19 +128,6 @@ export async function mirrorAndCommit(
 // ---------------------------------------------------------------------------
 // Private
 // ---------------------------------------------------------------------------
-
-async function detectBranch(repoDir: string): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd: repoDir,
-      timeout: 5_000,
-    });
-    const branch = stdout.trim();
-    return branch.length > 0 ? branch : "main";
-  } catch {
-    return "main";
-  }
-}
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
