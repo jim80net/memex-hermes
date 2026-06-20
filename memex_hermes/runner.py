@@ -298,9 +298,16 @@ class HermesRunner:
         # the old worker alive, but it watches only its OWN (set) stop
         # event and exits on its own; a re-armed worker is unaffected.
         worker.join(timeout=min(timeout_s, 0.5))
-        self._worker = None
-        self._worker_stop = None
-        self._worker_started.clear()
+        # Re-arm under the same lock ``_ensure_worker_running`` uses, so a future
+        # caller that drives ``shutdown`` and ``fire_and_forget`` from different
+        # threads cannot tear the worker reference / started latch mid-mutation.
+        # (The provider drives lifecycle calls sequentially on one thread today,
+        # so this is defensive; the join above stays outside the lock so a
+        # concurrent ``fire_and_forget`` is never blocked on the drain bound.)
+        with self._worker_lock:
+            self._worker = None
+            self._worker_stop = None
+            self._worker_started.clear()
 
     # ---- Internal: envelope, dispatch, blocking exec --------------------
 
