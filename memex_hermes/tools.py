@@ -94,12 +94,17 @@ def _search_schema() -> dict[str, Any]:
 
 
 def _remember_schema() -> dict[str, Any]:
+    # Parameters MUST match the binary's HermesToolRememberArgs contract
+    # (envelope.py: content, scope?, projectName?). The binary never reads a
+    # `type` field, and `projectName` is the only way to reach the D7
+    # "promotion to a named project" path (tool-remember.ts:78-84) — so the
+    # schema advertises projectName and omits the dead `type` param.
     return {
         "name": "memex_remember",
         "description": (
-            "Persist a new memory or rule into the user's memex. Writes a "
-            "markdown file with frontmatter and reports whether it synced to "
-            "the configured remote."
+            "Persist a new memory into the user's memex. Writes a markdown "
+            "file with frontmatter and reports whether it synced to the "
+            "configured remote."
         ),
         "parameters": {
             "type": "object",
@@ -116,10 +121,13 @@ def _remember_schema() -> dict[str, Any]:
                         "tools.memex_remember.defaultScope (project)."
                     ),
                 },
-                "type": {
+                "projectName": {
                     "type": "string",
-                    "enum": ["memory", "rule"],
-                    "description": "Entry type. Defaults to 'memory'.",
+                    "description": (
+                        "Optional named project to promote this memory into; "
+                        "writes under projects/<projectName>/memory/. When "
+                        "omitted, the entry follows 'scope'."
+                    ),
                 },
             },
             "required": ["content"],

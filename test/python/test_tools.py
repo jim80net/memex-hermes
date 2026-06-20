@@ -55,6 +55,18 @@ def test_remember_schema_has_content_required() -> None:
     assert "content" in remember["parameters"]["required"]
 
 
+def test_remember_schema_matches_binary_contract() -> None:
+    """The memex_remember params must match HermesToolRememberArgs:
+    content / scope / projectName — never the dead `type` param."""
+    schemas = all_tool_schemas()
+    remember = next(s for s in schemas if s["name"] == "memex_remember")
+    props = remember["parameters"]["properties"]
+    assert set(props) == {"content", "scope", "projectName"}, (
+        "remember schema must advertise exactly the binary's contract fields"
+    )
+    assert "type" not in props, "the binary never reads a `type` param"
+
+
 def test_recall_schema_has_name_required() -> None:
     schemas = all_tool_schemas()
     recall = next(s for s in schemas if s["name"] == "memex_recall")
