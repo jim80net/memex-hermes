@@ -1,7 +1,7 @@
 {
   "name": "memex-hermes-engine",
   "version": "0.1.0",
-  "description": "TypeScript engine extensions for memex-hermes: Hermes.* hook_event_name dispatch handlers that ride on the shared @jim80net/memex-core binary. Not published to npm; bundled into the prebuilt memex binary.",
+  "description": "TypeScript engine extensions for memex-hermes: Hermes.* hook_event_name dispatch handlers compiled into the memex-hermes binary (own GitHub release). Built via `bun build --compile` against @jim80net/memex-core as a library dependency. Not published to npm.",
   "private": true,
   "license": "MIT",
   "repository": {
@@ -24,7 +24,8 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@jim80net/memex-core": "^0.3.1"
+    "@huggingface/transformers": "^3.8.1",
+    "@jim80net/memex-core": "^0.4.0"
   },
   "packageManager": "pnpm@9.15.0"
 }

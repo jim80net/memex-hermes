@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "python",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "include-component-in-tag": false,
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "yaml",
+          "path": "plugin.yaml",
+          "jsonpath": "$.version"
+        }
+      ]
+    }
+  },
+  "$comment": "release-type=python drives version bumps in pyproject.toml. The json/yaml extra-files updaters bump the `version` field in the TypeScript package.json (which build.ts injects into the binary) and the plugin.yaml manifest via JSONPath, keeping all three in lock-step with the release WITHOUT requiring an x-release-please-version marker (the generic updater needs a marker; the json/yaml updaters target the field directly)."
+}

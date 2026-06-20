@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "memex-hermes"
 version = "0.1.0"
-description = "Memex skill/memory/rule router for Hermes Agent — semantic context injection via MemoryProvider, sharing the @jim80net/memex-core engine binary with memex-claude and memex-openclaw"
+description = "Memex skill/memory/rule router for Hermes Agent — semantic context injection via MemoryProvider, sharing the @jim80net/memex-core engine library with memex-claude and memex-openclaw (each adapter ships its own bun-compiled binary)"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Jim Park", email = "silentkhaos@gmail.com" }]
@@ -34,22 +34,44 @@ Issues = "https://github.com/jim80net/memex-hermes/issues"
 [project.entry-points."hermes_agent.plugins"]
 memex = "memex_hermes"
 
+[project.scripts]
+# Materialize step (R1 of hermes-plugin-packaging). Pip install alone
+# does NOT activate the memory provider; the user runs this once to
+# copy the provider files into $HERMES_HOME/plugins/memex/, then sets
+# memory.provider: memex in $HERMES_HOME/config.yaml.
+memex-hermes-install = "memex_hermes.install:main"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
   "mypy>=1.10",
   "ruff>=0.7",
+  "types-PyYAML>=6.0",
 ]
 
-# Pinned upstream `memex` binary release that this plugin version downloads on first run.
-# See bin/memex (the wrapper) and bin/install.sh for download logic; checksums.txt for SHA256 verification.
+# Pinned `memex-hermes` binary release that this plugin version downloads on first run.
+# memex-hermes builds and releases its OWN binary (Option A from the binary-architecture decision):
+# the binary contains the Hermes.* hook_event_name handlers from this repo's src/ and imports
+# @jim80net/memex-core as a library dep. See bin/memex (the wrapper) and bin/install.sh for the
+# download logic; checksums.txt for SHA256 verification.
 [tool.memex-hermes.binary]
-upstream-release = "memex-claude@v1.5.0"  # placeholder — bumped during release
+upstream-release = "memex-hermes@v0.1.0"  # placeholder — bumped to this package's own GitHub release during cut
 
 [tool.hatch.build.targets.wheel]
 packages = ["memex_hermes"]
-include = ["bin/**", "skills/**", "plugin.yaml", "checksums.txt"]
+
+# Ship non-Python distribution assets at the wheel root so the
+# materialize step (`memex-hermes-install`) can locate them via the
+# package parent dir, and so `bin/memex` ships alongside the wheel.
+# `include` alone won't pick up these paths because they are outside
+# the `packages` tree; `force-include` is the documented hatchling
+# mechanism for mapping source -> wheel paths verbatim.
+[tool.hatch.build.targets.wheel.force-include]
+"bin" = "memex_hermes/bin"
+"skills" = "memex_hermes/skills"
+"plugin.yaml" = "memex_hermes/plugin.yaml"
+"checksums.txt" = "memex_hermes/checksums.txt"
 
 [tool.hatch.build.targets.sdist]
 include = [

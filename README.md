@@ -4,7 +4,31 @@ Semantic skill, memory, and rule router for [Hermes Agent](https://hermes-agent.
 
 Built on [`@jim80net/memex-core`](https://github.com/jim80net/memex-core), the shared engine for embedding, indexing, and searching knowledge artifacts.
 
-> **Status:** alpha — this repository was bootstrapped on 2026-05-25. The pre-implementation verification spike (see `openspec/changes/bootstrap-memex-hermes-adapter/tasks.md` §2) must complete before the provider can ship.
+> **Status:** alpha — this repository was bootstrapped on 2026-05-25. The pre-implementation verification spike (see `openspec/changes/bootstrap-memex-hermes-adapter/tasks.md` §2) has cleared via source verification against Hermes v0.14.0 (see [`spike/SPIKE-COMPLETE.md`](spike/SPIKE-COMPLETE.md)); implementation is in progress.
+
+## Quickstart
+
+```bash
+# 1. Install the Python package
+pip install memex-hermes
+
+# 2. Materialize the provider directory under your Hermes home
+python -m memex_hermes.install
+# (creates $HERMES_HOME/plugins/memex/ — pip install alone does NOT activate the provider;
+# Hermes discovers memory providers by directory scan, not by entry-point)
+
+# 3. Enable the provider in $HERMES_HOME/config.yaml
+#    memory:
+#      provider: memex
+# (Only one external memory provider can be active at a time.)
+
+# 4. Next time you launch Hermes, memex is active
+hermes
+```
+
+The bundled `bin/memex` wrapper downloads the right prebuilt binary for your platform on first run, SHA256-verified, and caches it at `$HERMES_HOME/cache/memex/bin/memex`.
+
+See [USAGE.md](USAGE.md) for the full config reference, sync setup, bundled skill usage, and troubleshooting.
 
 ## Why this exists
 
@@ -56,21 +80,28 @@ No API keys required — embeddings run locally via ONNX.
 
 ## Installation
 
+Hermes discovers memory providers by **directory scan** of `$HERMES_HOME/plugins/<name>/` (verified against Hermes v0.14.0 source — see [`spike/SPIKE-COMPLETE.md`](spike/SPIKE-COMPLETE.md) R1). Activation is gated on the `memory.provider` config key in `$HERMES_HOME/config.yaml`. The `hermes_agent.plugins` pip entry-point is inventory-only and does NOT activate a memory provider; there is no `hermes plugins enable` step for memory providers.
+
 ### Option A: PyPI (recommended once published)
 
 ```bash
 pip install memex-hermes
-hermes plugins enable memex
+python -m memex_hermes.install              # materializes $HERMES_HOME/plugins/memex/
+# then add to $HERMES_HOME/config.yaml:
+#   memory:
+#     provider: memex
 ```
 
-The bundled `bin/memex` wrapper downloads the right prebuilt binary for your platform on first run, SHA256-verified.
+The bundled `bin/memex` wrapper downloads the right prebuilt binary for your platform on first run, SHA256-verified, into `$HERMES_HOME/cache/memex/bin/`.
 
 ### Option B: Manual clone (for developers)
 
 ```bash
 git clone https://github.com/jim80net/memex-hermes "$HERMES_HOME/plugins/memex"
 "$HERMES_HOME/plugins/memex/bin/install.sh"
-hermes plugins enable memex
+# then add to $HERMES_HOME/config.yaml:
+#   memory:
+#     provider: memex
 ```
 
 ### Option C: From source (contributors)
@@ -81,6 +112,8 @@ cd memex-hermes
 pip install -e ".[dev]"
 pnpm install     # for the TypeScript engine side
 ```
+
+> **One external provider at a time.** Hermes' `MemoryManager` accepts the built-in provider plus exactly ONE external provider (`agent/memory_manager.py:265-280`). memex coexists with the built-in but conflicts with other external providers (honcho, mem0, hindsight, retaindb, supermemory, etc.).
 
 ## Configuration
 

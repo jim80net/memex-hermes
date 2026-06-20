@@ -12,8 +12,8 @@ This change introduces a new repository, `memex-hermes`, that bridges Hermes int
 
 - Make memex available to Hermes users as a `MemoryProvider` subclass with no patches to Hermes itself.
 - Preserve cross-platform sync by guaranteeing the on-disk format (cache, telemetry, sync-repo layout, project-ID canonicalization, embedding model + version) stays byte-identical to `memex-claude` and `memex-openclaw`.
-- Share the same prebuilt `memex` binary artifact across adapters (`bun build --compile` output from `memex-claude`'s release pipeline).
-- Honor Hermes' documented contracts: `sync_turn() MUST be non-blocking`, `system_prompt_block()` output is cached into the prompt prefix (frozen at session start), `save_config(values, hermes_home)` receives `hermes_home` as an argument.
+- Reuse the shared `@jim80net/memex-core` engine **library** across adapters; this adapter ships its OWN `bun build --compile` binary (own `jim80net/memex-hermes` release) importing memex-core — keeping the on-disk format identical without coupling to `memex-claude`'s binary artifact.
+- Honor Hermes' verified v0.14.0 contracts: provider methods are called synchronously from the turn thread, so write paths (`sync_turn` etc.) are kept non-blocking via a daemon-thread queue rather than stalling the turn; `system_prompt_block()` output is cached into the prompt prefix (frozen at session start); `save_config(values, hermes_home)` receives `hermes_home` as an argument.
 - Bridge Hermes' built-in memory writes (`MEMORY.md` / `USER.md`) into the memex sync repo so a fact remembered in one harness reaches others.
 
 **Non-Goals:**
@@ -32,11 +32,11 @@ This change introduces a new repository, `memex-hermes`, that bridges Hermes int
 
 **Choice:** `MemoryProvider`. memex *is* a memory layer; impersonating one is the correct contract. The Memory Provider lifecycle maps cleanly to memex-claude's hook surface (`prefetch` ↔ `UserPromptSubmit`, `sync_turn` ↔ `Stop`, `on_session_end` ↔ Stop's extract-learnings, `on_memory_write` ↔ MEMORY.md mirror, `system_prompt_block` ↔ `SessionStart` injection). We also gain provider-specific tools (`memex_search` / `memex_remember` / `memex_recall`) that the agent can call deliberately when implicit prefetch misses.
 
-### D2 — Engine is the existing prebuilt binary, invoked via subprocess
+### D2 — Engine logic stays in `memex-core` (library); invoked via this repo's own prebuilt binary subprocess
 
-**Alternatives:** (E1) Python plugin subprocess-spawns the existing `memex` binary; (E2) pure Python port of memex-core; (E3) long-lived `memex --serve` daemon over a Unix socket.
+**Alternatives:** (E1) Python plugin subprocess-spawns a prebuilt `memex-hermes` binary (this repo's own `bun build --compile` of `@jim80net/memex-core` + the `Hermes.*` handlers); (E2) pure Python port of memex-core; (E3) long-lived `memex --serve` daemon over a Unix socket.
 
-**Choice:** E1 for v1. E2 forks the canonical on-disk format and forces two implementations to stay in lockstep forever — the single biggest threat to cross-platform sync. E3 is faster but adds daemon lifecycle complexity. E1 reuses the canonical engine, guarantees format compatibility, and accepts a per-turn subprocess fork (~30–80 ms cold start, measured upper bound 200 ms in §14). E3 stays a deferred follow-up triggered only if the budget is exceeded.
+**Choice:** E1 for v1. E2 forks the canonical on-disk format and forces two implementations to stay in lockstep forever — the single biggest threat to cross-platform sync. E3 is faster but adds daemon lifecycle complexity. E1 reuses the canonical engine **library**, guarantees format compatibility, and accepts a per-turn subprocess fork (~30–80 ms cold start, measured upper bound 200 ms in §14). E3 stays a deferred follow-up triggered only if the budget is exceeded. Note: the binary is **this adapter's own** release artifact (`jim80net/memex-hermes`), not `memex-claude`'s — importing the same `memex-core` library is what guarantees byte-identical on-disk format, while the `Hermes.*` handlers live in this repo's `src/`. (Reusing memex-claude's binary directly was the original plan and was pivoted to the own-binary architecture; see `pyproject.toml [tool.memex-hermes.binary]` + `bin/memex`.)
 
 ### D3 — Engine dispatch reuses `HookInput.hook_event_name`; no new CLI flags
 
@@ -44,11 +44,13 @@ This change introduces a new repository, `memex-hermes`, that bridges Hermes int
 
 **Choice:** Extend `hook_event_name`. `memex-core/src/types.ts:94` already defines it as a string; `memex-claude/src/main.ts` already dispatches on it. Introducing a CLI flag would fork the argument-parsing surface across adapters and force the binary to maintain two dispatch conventions forever. Single dispatch surface keeps the engine simple. (Systems-review finding F3.)
 
-### D4 — All binary invocations run off the agent's event loop
+### D4 — Read paths run synchronously; write paths never block the turn thread
 
-**Alternatives:** synchronous `subprocess.run` from the `def`-method body; `asyncio.create_subprocess_exec` with `await`; `asyncio.to_thread()` wrapping; dedicated daemon thread.
+**Verified contract (Hermes v0.14.0, source-grounded):** Hermes drives `MemoryProvider` methods **synchronously** from the turn thread — `agent/conversation_loop.py:run_conversation` is a plain `def` that runs on a thread and calls `agent/memory_manager.py:prefetch_all`/`sync_all` (sync `def`s), which call `provider.prefetch`/`sync_turn` directly. There is **no asyncio event loop** driving providers, so the earlier "dispatch off the event loop / `asyncio.to_thread`" framing does not apply to v0.14.0.
 
-**Choice:** `asyncio.to_thread()` for one-shot awaited calls (`prefetch`, `is_available`, `system_prompt_block`, `handle_tool_call`); daemon thread with bounded queue for fire-and-forget calls (`sync_turn`, `queue_prefetch`, `on_memory_write`). Hermes docs explicitly mandate `sync_turn() MUST be non-blocking`; a subprocess fork from a synchronous `def` method blocks the agent loop for the duration of the fork. (Systems-review finding F2.)
+**Alternatives:** synchronous `subprocess.run` straight from the method body (blocks the turn thread for the full fork); a worker thread joined within a bound; a daemon thread + bounded queue for writes.
+
+**Choice:** Read paths (`prefetch`, `is_available`, `system_prompt_block`, `handle_tool_call`, `on_pre_compress`, `on_session_end`) run the binary via `run_subprocess_sync` — a short-lived worker thread joined within the per-event timeout, so the timeout is enforced off the calling stack and a future async Hermes host can drive the same code unchanged. Write paths (`sync_turn`, `queue_prefetch`, `on_memory_write`, `on_session_switch`) use `fire_and_forget` — a daemon thread + bounded queue — so they return immediately and never stall the turn. A runner-level `await_subprocess` (`asyncio.to_thread`) surface is retained for a hypothetical future async Hermes host but is NOT on the v0.14.0 path. (Originally systems-review finding F2; corrected here to the source-verified synchronous model.)
 
 ### D5 — `system_prompt_block()` returns a static, session-lifetime string
 
@@ -101,7 +103,7 @@ This change introduces a new repository, `memex-hermes`, that bridges Hermes int
 This is a greenfield adapter; nothing to migrate. Three external impact points to manage:
 
 1. **`@jim80net/memex-core`**: no changes required for v1. The `Hermes.*` switch cases live in this repo's `src/main.ts`. Once stable, `src/core/hermes-paths.ts` and the `Hermes.*` handlers will be upstreamed into `memex-core` (the same evolution path `memex-claude` took). No breaking changes to core types or APIs.
-2. **GitHub release pipeline**: this repo's CI will pin to specific `memex-core` binary releases and verify their SHA256s. No new artifacts published from `memex-core`; we consume what `memex-claude`'s release pipeline already ships.
+2. **GitHub release pipeline**: this repo's CI builds and publishes its OWN per-platform `memex-hermes` binary (`bun build --compile`, importing `@jim80net/memex-core`) with `checksums.txt` for SHA256 verification; `bin/memex` downloads the pinned `jim80net/memex-hermes` release on first run. No artifacts are consumed from `memex-claude`'s pipeline.
 3. **PyPI registration**: `memex-hermes` is a new package name; reserve it before first release. Note (verified, see `spike/SPIKE-COMPLETE.md` R1): the `hermes_agent.plugins` entry-point is inventory-only and does NOT activate a memory provider — runtime activation requires the provider directory at `$HERMES_HOME/plugins/memex/` plus the `memory.provider: memex` config key. The pip install must therefore materialize that directory (postinstall/installer step), not rely on the entry-point alone.
 
 Rollback: uninstall via `pip uninstall memex-hermes` and remove `$HERMES_HOME/plugins/memex/`, then clear the `memory.provider` config key — fully reversible; no state outside `$HERMES_HOME/cache/memex/` and the optional sync repo. (There is no `hermes plugins disable` step for memory providers; deactivation is via the config key.)
