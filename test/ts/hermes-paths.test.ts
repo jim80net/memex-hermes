@@ -176,7 +176,8 @@ describe("resolveSyncRepoDir — local-path classification + expansion (P2-4, mi
     expect(resolveSyncRepoDir("$HOME/repo")).toBe("/home/tester/repo");
   });
 
-  it("${MY_ROOT}/x → expanded local path", () => {
+  it("braced env-var placeholder → expanded local path", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal ${VAR} placeholder is the test input
     expect(resolveSyncRepoDir("${MY_ROOT}/x")).toBe("/srv/custom/x");
   });
 
