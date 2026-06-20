@@ -7,9 +7,10 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  # OIDC for trusted PyPI publishing on tag (configured at the publish job).
-  # The id-token write permission is gated to the publish job only.
-  id-token: write
+  # NOTE: id-token: write (OIDC for trusted PyPI publishing) is granted ONLY at
+  # the publish-pypi job level (see that job's `permissions:` block) — NOT here.
+  # Least privilege keeps it off the release-please/build jobs, which run
+  # third-party actions and dependency installs.
 
 jobs:
   release-please:

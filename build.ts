@@ -50,7 +50,23 @@ function resolveOnnxBase(): string {
 }
 
 const ONNX_BASE = resolveOnnxBase();
-const SHARP_SYMLINK = "node_modules/.pnpm/@huggingface+transformers@3.8.1/node_modules/sharp";
+
+// Resolve the sharp module path to stub regardless of the installed
+// @huggingface/transformers version (the pnpm store dir embeds the exact
+// version, so a hardcoded path silently stops stubbing sharp on any bump).
+function resolveSharpSymlink(): string {
+  const pnpmBase = "node_modules/.pnpm";
+  if (existsSync(pnpmBase)) {
+    const entry = readdirSync(pnpmBase).find((e) => e.startsWith("@huggingface+transformers@"));
+    if (entry) {
+      return join(pnpmBase, entry, "node_modules/sharp");
+    }
+  }
+  // Non-pnpm / hoisted layout fallback.
+  return "node_modules/sharp";
+}
+
+const SHARP_SYMLINK = resolveSharpSymlink();
 
 interface PlatformFiles {
   onnxDir: string;
@@ -182,7 +198,14 @@ try {
       cpSync(src, dest);
       console.log(`  Copied ${lib}`);
     } else {
-      console.warn(`  Warning: ${src} not found, skipping`);
+      // A missing REQUIRED ONNX library would produce a binary that fails to
+      // load the embedding runtime at exec — refuse to build (and never
+      // publish) it. Throwing (rather than process.exit) lets the `finally`
+      // restore the sharp symlink before the non-zero exit propagates.
+      throw new Error(
+        `required ONNX shared library not found: ${src}. ` +
+          `Refusing to build a broken ${platformKey} binary.`,
+      );
     }
   }
 

@@ -124,7 +124,6 @@ export interface HermesToolRememberArgs {
 
 export interface HermesToolRecallArgs {
   name?: string;
-  limit?: number;
 }
 
 // ---- Input envelope ---------------------------------------------------------

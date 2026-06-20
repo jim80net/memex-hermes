@@ -78,6 +78,12 @@ _TOOL_EVENT_MAP: Final[Mapping[str, HermesEventName]] = {
     "memex_recall": HERMES_TOOL_RECALL,
 }
 
+# memex_remember is a WRITE tool: an explicit agent tool-call must honor the R5
+# suppression gate (non-primary agent_context) exactly like sync_turn /
+# on_memory_write. memex_search / memex_recall are reads and stay active in
+# every context.
+_WRITE_TOOLS: Final[frozenset[str]] = frozenset({"memex_remember"})
+
 
 class MemexProvider(MemoryProvider):  # type: ignore[misc]
     """memex adapter for Hermes' memory-provider plugin contract."""
@@ -342,6 +348,17 @@ class MemexProvider(MemoryProvider):  # type: ignore[misc]
         if event is None:
             return json.dumps(
                 {"error": "unknown_tool", "tool_name": tool_name},
+                separators=(",", ":"),
+            )
+        # R5: a write tool invoked from a non-primary context is suppressed
+        # before it reaches the binary — the tool-call path is otherwise a hole
+        # in the write-suppression invariant (the binary's tool-remember handler
+        # has no agent_context gate). Reads (search/recall) are never suppressed.
+        if tool_name in _WRITE_TOOLS and self._writes_suppressed(
+            reason_args={"tool": tool_name}
+        ):
+            return json.dumps(
+                {"suppressed": "non_primary_context", "tool_name": tool_name},
                 separators=(",", ":"),
             )
         runner = self._runner_or_none()

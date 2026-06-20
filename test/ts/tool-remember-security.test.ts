@@ -1,0 +1,46 @@
+// Path-traversal hardening for Hermes.tool-remember (cubic P1).
+//
+// `projectName` is LLM/user-controlled and becomes a path segment under the
+// sync repo. A crafted value containing `..` or a separator must be rejected,
+// and no scope branch may ever resolve a write target outside the sync repo.
+
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { DEFAULT_CONFIG } from "../../src/core/config.ts";
+import { handleToolRemember } from "../../src/hooks/tool-remember.ts";
+import { makeFakePaths, makeTmpRoot } from "./_helpers.ts";
+
+describe("tool-remember path-traversal hardening", () => {
+  it("rejects a projectName with a .. traversal segment", async () => {
+    const paths = makeFakePaths(await makeTmpRoot());
+    await expect(
+      handleToolRemember({ content: "x", projectName: "../../../etc" }, "", DEFAULT_CONFIG, paths),
+    ).rejects.toThrow(/invalid projectName/);
+  });
+
+  it("rejects a projectName containing a path separator", async () => {
+    const paths = makeFakePaths(await makeTmpRoot());
+    await expect(
+      handleToolRemember({ content: "x", projectName: "a/b" }, "", DEFAULT_CONFIG, paths),
+    ).rejects.toThrow(/invalid projectName/);
+  });
+
+  it("rejects a projectName starting with ~", async () => {
+    const paths = makeFakePaths(await makeTmpRoot());
+    await expect(
+      handleToolRemember({ content: "x", projectName: "~root" }, "", DEFAULT_CONFIG, paths),
+    ).rejects.toThrow(/invalid projectName/);
+  });
+
+  it("writes a valid named project under the sync repo", async () => {
+    const paths = makeFakePaths(await makeTmpRoot());
+    const res = await handleToolRemember(
+      { content: "# title\nbody", projectName: "my-project" },
+      "",
+      DEFAULT_CONFIG,
+      paths,
+    );
+    const expectedPrefix = join(paths.syncRepoDir, "projects", "my-project", "memory");
+    expect(res.written.startsWith(expectedPrefix)).toBe(true);
+  });
+});

@@ -8,7 +8,7 @@
 
 import { randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import type { Logger } from "@jim80net/memex-core";
 import type { HermesConfig } from "../core/config.ts";
 import type {
@@ -43,6 +43,11 @@ export async function handleToolRemember(
     config,
     paths,
   );
+  // Defense-in-depth across ALL scope branches: never write outside the sync
+  // repo even if a projectId (e.g. a crafted projectName, or an unexpected
+  // session id) contains path-traversal. `join` normalizes `..`, so resolving
+  // and checking containment catches an escape regardless of the input shape.
+  assertWithinSyncRepo(targetDir, paths.syncRepoDir);
   await mkdir(targetDir, { recursive: true });
 
   const slug = slugify(extractTitle(args.content));
@@ -68,6 +73,46 @@ export async function handleToolRemember(
 // Private
 // ---------------------------------------------------------------------------
 
+/**
+ * Validate an LLM/user-supplied `projectName` before it becomes a path segment.
+ * A named project is a single identifier — it must not contain path separators,
+ * a `..` traversal segment, a leading `~`, or a NUL. Rejecting these up front
+ * gives a clear error; the resolved-containment check in handleToolRemember is
+ * the backstop. Returns the validated name.
+ */
+function validateProjectName(projectName: string): string {
+  const bad =
+    projectName.includes("/") ||
+    projectName.includes("\\") ||
+    projectName.includes("\0") ||
+    projectName.startsWith("~") ||
+    projectName.split(/[/\\]/).includes("..") ||
+    projectName === "." ||
+    projectName === "..";
+  if (bad) {
+    throw new Error(
+      `memex_remember: invalid projectName ${JSON.stringify(projectName)} ` +
+        `(must not contain path separators, '..', or a leading '~')`,
+    );
+  }
+  return projectName;
+}
+
+/**
+ * Refuse to write outside the sync repo. `resolve` normalizes any `..` that
+ * slipped through, so a target that escapes `syncRepoDir` is caught here for
+ * every scope branch (path-traversal hardening).
+ */
+function assertWithinSyncRepo(targetDir: string, syncRepoDir: string): void {
+  const root = resolve(syncRepoDir);
+  const resolved = resolve(targetDir);
+  if (resolved !== root && !resolved.startsWith(root + sep)) {
+    throw new Error(
+      `memex_remember: refusing to write outside the sync repo (resolved to ${resolved})`,
+    );
+  }
+}
+
 async function resolveTargetDir(
   scope: HermesToolScope,
   projectName: string | undefined,
@@ -77,7 +122,7 @@ async function resolveTargetDir(
   paths: HermesPaths,
 ): Promise<{ targetDir: string; projectId: string | null }> {
   if (projectName && projectName.length > 0) {
-    const projectId = projectName;
+    const projectId = validateProjectName(projectName);
     return {
       targetDir: join(paths.syncRepoDir, "projects", projectId, "memory"),
       projectId,

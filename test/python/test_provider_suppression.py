@@ -66,9 +66,28 @@ def test_read_paths_remain_active_for_subagent(tmp_path: Path) -> None:
     p, stub = _provider_with_context(tmp_path, "subagent")
     p.prefetch("q", session_id="s")
     p.handle_tool_call("memex_search", {"query": "x"})
+    p.handle_tool_call("memex_recall", {"name": "x"})
     event_names = [c.event_name for c in stub.calls]
     assert "Hermes.prefetch" in event_names
     assert "Hermes.tool-search" in event_names
+    assert "Hermes.tool-recall" in event_names
+
+
+@pytest.mark.parametrize("context", ["subagent", "cron", "flush"])
+def test_remember_tool_call_suppressed_for_non_primary(tmp_path: Path, context: str) -> None:
+    # memex_remember is a WRITE tool: an explicit tool-call from a non-primary
+    # context must be suppressed before reaching the binary (the binary's
+    # tool-remember handler has no agent_context gate), closing the R5 hole.
+    p, stub = _provider_with_context(tmp_path, context)
+    result = p.handle_tool_call("memex_remember", {"content": "x"})
+    assert stub.calls == [], f"memex_remember must be suppressed for {context}"
+    assert "suppressed" in result
+
+
+def test_remember_tool_call_active_for_primary(tmp_path: Path) -> None:
+    p, stub = _provider_with_context(tmp_path, "primary")
+    p.handle_tool_call("memex_remember", {"content": "x"})
+    assert any(c.event_name == "Hermes.tool-remember" for c in stub.calls)
 
 
 def test_metadata_execution_context_can_override(

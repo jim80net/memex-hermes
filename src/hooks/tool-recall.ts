@@ -7,9 +7,10 @@
 //     which we surface via the same envelope by leaving entries empty when
 //     no name matches.
 //
-// We accept either a single `name` (the spec'd path) or a `limit` (a small
-// helper to list the most recently matched entries in the index). The
-// envelope already declares both fields as optional.
+// We accept a single optional `name` (the spec'd path); a missing/blank name
+// returns an empty `entries` array. (An earlier `limit` "list recent entries"
+// affordance was never implemented, so it has been dropped from the contract
+// rather than advertise an ignored parameter.)
 
 import { readFile } from "node:fs/promises";
 import type { SkillIndex } from "@jim80net/memex-core";

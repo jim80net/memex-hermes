@@ -8,15 +8,17 @@
       "include-component-in-tag": false,
       "extra-files": [
         {
-          "type": "generic",
-          "path": "package.json"
+          "type": "json",
+          "path": "package.json",
+          "jsonpath": "$.version"
         },
         {
-          "type": "generic",
-          "path": "plugin.yaml"
+          "type": "yaml",
+          "path": "plugin.yaml",
+          "jsonpath": "$.version"
         }
       ]
     }
   },
-  "$comment": "release-type=python drives version bumps in pyproject.toml. extra-files keep the TypeScript package.json and plugin.yaml manifests in lock-step. Both are searched for the literal `x-release-please-version` marker; without the marker release-please leaves them alone (so adding a marker is the opt-in)."
+  "$comment": "release-type=python drives version bumps in pyproject.toml. The json/yaml extra-files updaters bump the `version` field in the TypeScript package.json (which build.ts injects into the binary) and the plugin.yaml manifest via JSONPath, keeping all three in lock-step with the release WITHOUT requiring an x-release-please-version marker (the generic updater needs a marker; the json/yaml updaters target the field directly)."
 }

@@ -151,7 +151,6 @@ class HermesToolRememberArgs(TypedDict):
 
 class HermesToolRecallArgs(TypedDict):
     name: NotRequired[str]
-    limit: NotRequired[int]
 
 
 # ---- Input envelope -------------------------------------------------------
