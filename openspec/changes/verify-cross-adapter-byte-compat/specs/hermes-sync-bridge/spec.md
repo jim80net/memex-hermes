@@ -1,48 +1,57 @@
 ## ADDED Requirements
 
-### Requirement: Cross-adapter on-disk format is byte-compatible and verified
+### Requirement: Cross-adapter memory-file format is verified by a golden fixture
 
-The memory-file format memex-hermes writes SHALL be byte-compatible with the
-shared `@jim80net/memex-core` read path (`parseFrontmatter` / `parseMemoryFile`)
-that every adapter uses, so that a memory authored under any adapter is read
-back identically under any other. memex-hermes SHALL synthesize that format
-through a single shared formatter (`src/core/memory-format.ts`) used by every
-write path (`memex_remember`, session-end learnings), rather than duplicating
-the frontmatter shape per hook.
+A memory entry authored under memex-hermes SHALL be readable, unchanged, by the
+shared `@jim80net/memex-core` parser (`parseFrontmatter` / `parseMemoryFile`)
+that every adapter uses. The guarantee is **semantic round-trip of the parsed
+entry** (`name`, `description`, `queries`, `body`) — NOT byte-identity of the
+file, since memex-hermes filenames carry a timestamp + random suffix and are
+never byte-equal across writers. The on-disk memory-file text is the source of
+truth for the corpus; the embedding cache (`memex-cache.json`) and embedding
+vectors are regenerable derivatives (`loadCache` discards on `version` /
+`embeddingModel` mismatch and re-embeds from the text), so corpus survival rests
+on the memory-file text being readable, not on cache reuse.
 
-To keep the embedding cache (`memex-cache.json`) and the embedding vector space
-compatible across adapters, memex-hermes SHALL pin `@huggingface/transformers`
-and `@jim80net/memex-core` to ranges aligned with the peer adapters
-(`memex-claude` / `memex-openclaw`). The cache's `embeddingModel` string is
-necessary but NOT sufficient: an independent `@huggingface/transformers` bump
-silently drifts the vector space under the same model name, and an independent
-`@jim80net/memex-core` major/minor bump can change the cache schema
-(`CACHE_VERSION`). Both SHALL be guarded by a version-pin alignment test that
-fails loudly on divergence.
+memex-hermes SHALL synthesize the frontmatter format through a single shared
+formatter (`src/core/memory-format.ts`) used by every write path
+(`memex_remember`, session-end learnings); the formatter SHALL treat the body as
+opaque (callers own any trimming) so extraction introduces no on-disk behavior
+change.
 
-These guarantees SHALL be verified by a committed golden fixture (a canonical
-memory file in the shared format) exercised in three directions — read, write,
-and round-trip — plus the version-pin alignment test. Verification SHALL be
-self-contained: it SHALL NOT require a live `memex-claude` installation; the
-golden fixture is the peer-adapter stand-in.
+To keep the embedding cache reusable and the embedding ranking stable across
+adapters (a warm-cache optimization, not a corpus-survival requirement),
+memex-hermes SHALL pin `@huggingface/transformers` and `@jim80net/memex-core` to
+versions aligned with the peer adapters, guarded by a test that asserts the
+INSTALLED (resolved) transformers version — not merely the declared caret range —
+matches the cross-adapter reference, and that memex-hermes's declared transformers
+range matches the installed memex-core's declared range.
 
-#### Scenario: Peer-written memory file reads back identically
-- **GIVEN** the committed golden memory file in the shared memex-core frontmatter format
-- **WHEN** it is parsed via memex-core's public `parseMemoryFile`
-- **THEN** the resulting entry's `name`, `description`, `queries`, and `body` match the documented expected values exactly
+Verification SHALL be self-contained — it SHALL NOT require a live `memex-claude`
+installation; a committed golden fixture is the peer-adapter stand-in.
 
-#### Scenario: memex-hermes write conforms to the shared format
+#### Scenario: Peer-shaped memory file parses to the expected entry
+- **GIVEN** the committed golden memory files (frontmatter style and section/`USER.md` style)
+- **WHEN** each is parsed via memex-core's `parseFrontmatter` (the recall read path) and `parseMemoryFile` (the scan/index path, which returns an array)
+- **THEN** the resulting single entry's `name`, `description`, `queries`, and `body` match the documented expected values exactly
+
+#### Scenario: memex-hermes write round-trips through the shared reader
 - **GIVEN** a fixed memory entry input (name, description, type, body)
 - **WHEN** memex-hermes's shared formatter renders it
-- **THEN** the produced bytes equal the committed golden body
-- **AND** feeding that output back through `parseMemoryFile` yields the same entry (round-trip)
+- **THEN** the produced bytes equal the committed golden frontmatter body
+- **AND** feeding that output back through `parseMemoryFile` yields the same parsed entry
+
+#### Scenario: Frontmatter-scalar escaping boundary is pinned, not hidden
+- **GIVEN** a frontmatter `name`/`description` containing an embedded `"` or `\`
+- **WHEN** it is written via the shared formatter and read back via the shared parser
+- **THEN** the test asserts the CURRENT (non-round-tripping) behavior and links the tracking issue, so the boundary is documented and flips to a fidelity assertion when the contract is fixed
 
 #### Scenario: Independent transformers bump fails the alignment guard
-- **GIVEN** the committed cross-adapter reference ranges for `@huggingface/transformers` and `@jim80net/memex-core`
-- **WHEN** memex-hermes's declared range for either diverges from the reference (or from the installed memex-core's transformers range)
+- **GIVEN** the committed cross-adapter reference (resolved transformers version + declared ranges)
+- **WHEN** the installed transformers version, or memex-hermes's declared range, diverges from the reference (or from the installed memex-core's range)
 - **THEN** the version-pin alignment test fails, surfacing the drift before it ships
 
-#### Scenario: The compiled binary reads a peer-written memory file
+#### Scenario: The compiled binary reads a peer-shaped memory file (e2e)
 - **GIVEN** the golden memory file staged in a project memory dir inside a scratch sync repo, and `MEMEX_E2E=1` with a built binary
-- **WHEN** the binary's read path (prefetch/search) runs against a query the golden entry should match
-- **THEN** the binary surfaces the golden entry, proving the compiled artifact (bundled memex-core + transformers) consumes the shared format end-to-end
+- **WHEN** the binary's prefetch/search runs against a query the golden entry should match
+- **THEN** the binary surfaces the golden entry (the test fails, and does not skip, if it does not — the integration job guarantees the embedding backend)

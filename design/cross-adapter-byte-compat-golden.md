@@ -1,192 +1,205 @@
 # Design — Cross-adapter byte-compatibility golden fixture (issue #4)
 
-**Status:** proposed
-**Issue:** [#4](https://github.com/jim80net/memex-hermes/issues/4) — Add cross-adapter byte-compat golden fixture (E2E §11.3 round-trip)
-**Author:** memex flotilla XO
-**Date:** 2026-06-23
+**Status:** proposed (rev 2 — incorporates the design-gate review trio:
+systems-review + open-code-review + STORM, all findings below)
+**Issue:** [#4](https://github.com/jim80net/memex-hermes/issues/4)
+**Author:** memex flotilla XO · **Date:** 2026-06-23
 
 ## 1. Problem
 
-The load-bearing product invariant — *the on-disk corpus memex-hermes writes is
-byte-identical with what `memex-claude` / `memex-openclaw` write and read* — is
-today verified only by:
+The product invariant that makes the memex family worth shipping — *a memory
+authored under one adapter is read back unchanged under another* — is, in
+memex-hermes, verified only by a **negative** grep
+(`test/python/test_no_engine_imports.py`) and **prose**. The positive round-trip
+(`test/e2e/test_sync_compat.py::test_cross_adapter_round_trip_tracked_as_followup`)
+is a `pytest.skip()` placeholder gated behind `MEMEX_E2E=1` **and a live
+`memex-claude` install** that never runs. It is the weakest-verified invariant
+in the adapter, and it is now the load-bearing **memory-portability guarantee**
+underwriting the operator's Hermes teardown / corpus-salvage boundary.
 
-- a **negative** grep (`test/python/test_no_engine_imports.py`: "no embedding
-  imports, no `git` subprocess in the Python layer"), and
-- **prose** assertions in `test/e2e/test_sync_compat.py` +
-  `hermes-sync-bridge` spec language.
+## 2. What the guarantee actually is (corrected framing)
 
-There is no **positive** round-trip proving a real file written in the shared
-format is read back identically across adapters. The intended test
-(`test_sync_compat.py::test_cross_adapter_round_trip_tracked_as_followup`) is a
-`pytest.skip()` placeholder, and the §11.3 task is `[ ]`, gated behind
-`MEMEX_E2E=1` **and a live `memex-claude` install** — which never runs.
+The review trio established two corrections that reshape the design:
 
-This is the weakest-verified invariant in the adapter. It is now also
-operator-load-bearing: it is the **memory-portability guarantee** underwriting
-the Hermes teardown / corpus-salvage boundary (a corpus written under one
-adapter must survive being read under another).
+**(a) The guarantee is SEMANTIC round-trip of a parsed entry, NOT byte-identity
+of a file.** memex-hermes filenames carry a timestamp + random suffix
+(`tool-remember.ts`), so two adapters' files are *never* byte-identical. The
+real, testable guarantee is: *the `{name, description, queries, body}` an adapter
+parses from a file equals what the writing adapter intended*, where the reader is
+the **shared** `@jim80net/memex-core` parser every adapter uses. We say
+"byte-compatible" only for the literally-true claim: hermes's written file BODY +
+frontmatter shape match a committed golden byte-for-byte.
 
-## 2. Root-cause framing — where the format actually lives
+**(b) The on-disk text is the source of truth; the cache + vectors are
+regenerable derivatives.** `loadCache` discards the cache on any `version` /
+`embeddingModel` mismatch and re-embeds from the `.md` files
+(`memex-core/cache.ts`, `skill-index.ts`). Therefore the **corpus-survival**
+guarantee rests entirely on **L1 (the memory-file text)** being readable by the
+shared parser. The cache (L2) and embedding vectors (L3) are a warm-cache
+optimization: an adapter with a mismatched engine simply re-embeds. This focuses
+the rigor where it belongs (L1) and downgrades the version-pin guard (below) from
+a "corpus survives" guard to a "warm-cache reuse + ranking stability" guard.
 
-The on-disk format is **not** owned by memex-hermes. It is owned by the shared
-`@jim80net/memex-core` library that *every* adapter links as a dependency.
-memex-core owns three distinct format layers:
+### Format layers and where memex-hermes can break them
 
-| # | Layer | Owner (read) | Owner (write) | Drift risk in memex-hermes |
-|---|-------|--------------|---------------|----------------------------|
-| **L1** | Memory-file frontmatter (`---\nname/description/type\n---\n\n<body>`) | memex-core `parseFrontmatter` / `parseMemoryFile` (`skill-index.ts`) | **adapter-local** — hermes synthesizes it in `tool-remember.ts::formatMemory` and `session-end.ts::formatLearningFile` | **HIGH** — this is the one place hermes writes the format itself |
-| **L2** | `memex-cache.json` (`CACHE_VERSION=2`, compact JSON) | memex-core `loadCache` | memex-core `saveCache` | **LOW** — hermes never writes the cache directly; `SkillIndex` does. Compat is by construction, *given the same memex-core version* |
-| **L3** | Embedding vectors stored in L2 | memex-core `LocalEmbeddingProvider` via `@huggingface/transformers` | same | **SILENT** — same `embeddingModel` string but a different transformers version → different vectors. `loadCache` accepts the drifted cache (version + model match), so the drift is invisible |
+| # | Layer | Read owner | Write owner | Corpus-critical? | hermes drift risk |
+|---|-------|-----------|-------------|------------------|-------------------|
+| **L1a** | Frontmatter memory file (`---\nname/description/type\n---\n\n<body>`) | memex-core `parseFrontmatter` / `parseMemoryFile` | **adapter-local** — hermes `formatMemory` / `formatLearningFile` | **YES** | **HIGH** — only layer hermes writes itself |
+| **L1b** | Section-style memory file (`## heading` + `Triggers:`), incl. mirrored `USER.md` | memex-core `parseMemoryFile` section fallback | passthrough mirror of Hermes's `USER.md` (`_mirror.ts`, verbatim) | **YES** | LOW (verbatim) — but the *read* path must parse it |
+| **L2** | `memex-cache.json` (`CACHE_VERSION=2`) | memex-core `loadCache` | memex-core `saveCache` (via `SkillIndex`) | NO (regenerable) | LOW |
+| **L3** | Embedding vectors in L2 | memex-core `LocalEmbeddingProvider` (`@huggingface/transformers`) | same | NO (regenerable) | SILENT (version skew → different vectors → ranking drift) |
 
-The byte-compat invariant therefore decomposes into three sub-invariants:
+memex-claude has **no** frontmatter-synthesizing writer of its own (its memories
+are authored as `.md` files and read through the same shared parser). So the
+cross-adapter invariant reduces to: **hermes writes → the shared memex-core
+parser reads correctly**. That is exactly what Tier 1 proves.
 
-- **I1 (correctness-critical):** hermes's memory-file **write** shape must parse
-  cleanly through memex-core's **read** path. If hermes emits frontmatter
-  memex-core can't parse, the peer adapter silently drops that memory → real
-  corpus loss. This is the *only* layer hermes can break on its own.
-- **I2 (format version):** the `memex-cache.json` schema is identical across
-  adapters **iff they link the same `@jim80net/memex-core` major/minor**.
-  `CACHE_VERSION` bumps on schema change, and `loadCache` discards a cache whose
-  `version` differs — so the failure mode of an L2 skew is *cold re-embed*
-  (slow), not corruption. The guard is **version alignment**, not a format test.
-- **I3 (embedding space):** the cache stores vectors. Two adapters that link
-  **different `@huggingface/transformers` versions** produce different vectors
-  for the same text under the *same* `embeddingModel` string. `loadCache` cannot
-  detect this (version + model match), so a cache written by claude and read by
-  hermes would carry subtly wrong vectors → silent ranking degradation. The
-  guard is **transformers-version alignment**, not a format test.
+### Empirically-confirmed state (read this session, 2026-06-23)
 
-### Empirically-confirmed current state (read this session, 2026-06-23)
-
-From the committed lockfiles (`pnpm-lock.yaml`) of both repos:
-
-- `memex-hermes`: `@huggingface/transformers@3.8.1`, `@jim80net/memex-core@0.4.0`
-- `memex-claude`: `@huggingface/transformers@3.8.1`, `@jim80net/memex-core@0.4.0`
-- `@jim80net/memex-core@0.4.0` itself depends on `@huggingface/transformers: 3.8.1`
-
-All three are aligned today. The guard exists to make a *future* independent bump
-**fail loudly** instead of silently drifting the corpus.
+- Both `memex-hermes` and `memex-claude` lockfiles resolve
+  `@huggingface/transformers@3.8.1` and `@jim80net/memex-core@0.4.0`;
+  `memex-core@0.4.0` declares `@huggingface/transformers: ^3.8.1` under
+  **`optionalDependencies`** (not `dependencies`).
+- Writer↔reader round-trip probe (hermes `safeYamlScalar` → memex-core
+  `parseFrontmatter`/`parseMemoryFile`): **colon, unicode, trailing-space
+  round-trip correctly; embedded `"` and `\` do NOT** (they retain
+  backslash-escape artifacts). Bodies always round-trip. This is the
+  `safeYamlScalar`↔`parseFrontmatter` contract gap — filed as **#10**, pinned
+  (not silently shipped) by this fixture. It is *consistent* across adapters (the
+  shared parser yields the same value everywhere), so it is a fidelity boundary,
+  not a cross-adapter inconsistency.
 
 ## 3. Approach — three tiers, self-contained, no live memex-claude
 
-The original §11.3 design required running memex-claude in CI. We reframe it: a
-**committed golden fixture** is the stand-in for "what memex-claude writes." The
-golden file *is* the cross-adapter contract artifact; conformance is proven
-against it without installing the peer.
+A **committed golden fixture** is the stand-in for "what a peer adapter writes."
 
-### Tier 1 — Memory-file format conformance (vitest, always-on)  ← the load-bearing test
+### Tier 1 — Memory-file conformance (vitest, always-on)  ← the load-bearing test
 
-Runs in the `typescript` CI job on every PR. Deterministic; no binary, no model
-download.
+Runs in the `typescript` CI job. Deterministic; no binary, no model download.
 
-**Fixtures** (committed under `test/fixtures/cross-adapter/`):
-- `golden-memory.md` — a canonical individual memory file in the exact
-  memex-core frontmatter shape (the "written by memex-claude" artifact).
-- `README.md` — provenance + regeneration instructions.
+**Fixtures** under `test/fixtures/cross-adapter/`:
+- `golden-memory-frontmatter.md` — canonical individual memory file (L1a),
+  **adversarial**: description carries a `:`, a non-ASCII char, and a
+  leading/trailing space (the cases that MUST round-trip).
+- `golden-memory-section.md` — section-style file (L1b), the `USER.md` shape
+  (`## heading` + `Triggers:`), to be validated against the operator's real
+  `~/.hermes/memories/USER.md` (321B) when openclaude-migration hands it over;
+  the synthetic golden lands now so the path is covered immediately.
+- `README.md` — provenance, what each fixture proves, regeneration steps.
 
-**Read conformance:** parse `golden-memory.md` via memex-core's **public**
-`parseMemoryFile` → assert the resulting entry's `{name, description, queries,
-body}` exactly match expected values. Proves hermes (which reads via this exact
-function) consumes a peer-written file identically.
+**Read conformance:** parse each golden via BOTH the function hermes actually
+calls on its recall path (`parseFrontmatter`, `tool-recall.ts:60`) AND the
+scan/index function (`parseMemoryFile`, which takes a `filePath` arg and returns
+an **array** — assert `length === 1`, index `[0]`). Assert the parsed
+`{name, description, queries, body}` exactly match expected (note: hermes-written
+files carry no `queries:`, so `queries === []` — the section golden exercises the
+`Triggers:` → `queries` path so the list parser is covered).
 
-**Write conformance + round-trip:** call hermes's memory-file writer with fixed
-inputs → assert the produced bytes **equal the committed golden body**, then
-feed that output back through `parseMemoryFile` → assert the same entry. This
-closes the loop: *hermes writes → memex-core reads → identical*.
+**Write conformance + round-trip:** call hermes's shared formatter with fixed
+input → assert the produced bytes equal the committed golden frontmatter body,
+then feed it back through `parseMemoryFile` → assert the same entry.
 
-To test the **real** writer (not a copy), extract the duplicated 5-line
-frontmatter-block logic — currently copy-pasted between
-`tool-remember.ts::formatMemory` and `session-end.ts::formatLearningFile` — into
-a single shared module `src/core/memory-format.ts`. The cross-adapter on-disk
-format is a *contract*; it deserves one named home, not duplication across two
-hooks. Both hooks then call the shared formatter. This is the foundational
-redesign the format demands and is a prerequisite for honestly testing "the
-writer."
+**Pinned escaping boundary (#10):** an explicit test asserting the *known*
+behavior — embedded `"`/`\` in a frontmatter scalar does NOT round-trip — with a
+comment linking #10. This documents the boundary instead of hiding it behind a
+clean fixture; when #10 is fixed, this test flips to asserting fidelity.
+
+**Shared formatter extraction (prerequisite, no behavior change):** extract the
+duplicated 5-line frontmatter block into `src/core/memory-format.ts` exporting
+`formatMemoryEntry({name, description, type, body})`. **Contract: the formatter
+treats `body` as OPAQUE — it does NOT trim.** This preserves both current call
+sites exactly: `tool-remember.ts` keeps its `content.trim()` at the call site;
+`session-end.ts` keeps passing `learning.body` raw. (The two writers differ today
+— `formatMemory` trims, `formatLearningFile` does not — so a trimming formatter
+would silently change one of them.) Byte-level regression tests for BOTH writers
+gate the extraction (none exists today for `formatMemory`'s body).
 
 ### Tier 2 — Version-pin alignment guard (vitest, always-on)
 
-`test/ts/cross-adapter-pin-alignment.test.ts`. Guards I2 + I3.
+`test/ts/cross-adapter-pin-alignment.test.ts`. Guards L3 ranking-stability + L2
+schema (warm-cache, per §2(b) — not corpus survival).
 
-- **Cross-adapter reference (I3):** a committed constant
-  `CROSS_ADAPTER_TRANSFORMERS_RANGE = "^3.8.1"` (sourced from memex-claude's
-  `package.json`, provenance-commented). Assert memex-hermes's declared
-  `@huggingface/transformers` range equals it. A doc note instructs: bump in
-  lockstep with memex-claude.
-- **Shared-engine consistency (I3, non-stale):** read the **installed**
-  `node_modules/@jim80net/memex-core/package.json` (a real hermes dependency —
-  self-contained) and assert memex-hermes's `@huggingface/transformers` range
-  equals memex-core's declared range. This catches the real silent drift: if
-  memex-core bumps transformers in a release and hermes's direct pin doesn't
-  follow, the bundled vector space could diverge from what the embedding code
-  was written against.
-- **Cache-format alignment (I2):** a committed constant
-  `CROSS_ADAPTER_MEMEX_CORE_RANGE = "^0.4.0"`; assert memex-hermes's declared
-  `@jim80net/memex-core` range equals it (same memex-core ⇒ same `CACHE_VERSION`
-  ⇒ same cache schema).
+Committed references (provenance-commented → memex-claude, read 2026-06-23):
+`CROSS_ADAPTER_TRANSFORMERS_RANGE = "^3.8.1"`,
+`CROSS_ADAPTER_TRANSFORMERS_RESOLVED = "3.8.1"`,
+`CROSS_ADAPTER_MEMEX_CORE_RANGE = "^0.4.0"`.
 
-The committed-reference arm encodes the *cross-adapter* contract value
-(self-contained, the issue's explicit ask); the installed-core arm makes it
-**non-stale** by tying to a real dependency that moves when the engine moves.
+- **Declared range (documentary):** hermes `package.json`
+  `@huggingface/transformers` and `@jim80net/memex-core` ranges === the
+  committed ranges.
+- **Resolved version (load-bearing):** read the INSTALLED
+  `node_modules/@huggingface/transformers/package.json` `.version` and assert it
+  === `CROSS_ADAPTER_TRANSFORMERS_RESOLVED`. This is the version actually bundled
+  into the binary — a caret range can resolve to a different version, so the
+  resolved check is what catches the silent vector-space drift; the range check
+  is only documentary.
+- **Shared-engine consistency:** read memex-core's `@huggingface/transformers`
+  range from the INSTALLED `node_modules/@jim80net/memex-core/package.json`,
+  reading across `dependencies` ∪ `optionalDependencies` ∪ `peerDependencies`
+  (it lives under `optionalDependencies`); assert it is defined (absence is
+  itself drift) and equals hermes's declared range.
 
-### Tier 3 — Binary round-trip (pytest e2e, `MEMEX_E2E` gate)  ← higher-fidelity
+A doc note: bump in lockstep with memex-claude + memex-core.
 
-Upgrade `test_sync_compat.py::test_cross_adapter_round_trip_tracked_as_followup`
-from a `skip` into a **real** round-trip against the freshly-built binary. This
-runs in the existing `integration-smoke` CI job, which already builds the
-linux-x64 binary and runs `pytest test/e2e` under `MEMEX_E2E=1`. No memex-claude
-install — the golden file is the peer stand-in.
+### Tier 3 — Binary conformance (pytest e2e, `MEMEX_E2E` gate)
 
-- **Read direction:** stage `golden-memory.md` into a project memory dir inside a
-  scratch sync repo; drive the binary's `prefetch` (or `memex_search`) path with
-  a query the golden entry should match; assert the binary surfaces it. Proves
-  the **compiled artifact** (bundled memex-core + transformers + real embeddings)
-  reads a peer-written file end-to-end.
-- **Write direction:** drive `memex_remember` on the binary; assert the written
-  file's frontmatter structurally matches the golden shape (delimiters, key
-  order, `type:`, trailing newline). This extends the existing
-  `test_memex_remember_writes_claude_compatible_file` with an explicit
-  golden-shape assertion rather than a loose "contains payload" check.
+Replaces the `test_cross_adapter_round_trip_tracked_as_followup` skip. Runs in
+the existing `integration-smoke` job (builds the linux-x64 binary, runs
+`pytest test/e2e` under `MEMEX_E2E=1`). No memex-claude — the golden file is the
+peer stand-in.
 
-The golden body's *content* is deterministic; the only non-deterministic parts
-the binary adds are in the **filename** (timestamp + random suffix), not the body
-— so a body-level golden comparison is stable.
+- **Write direction (deterministic, hard):** drive `memex_remember` on the built
+  binary; assert the written file's frontmatter structurally matches the golden
+  shape (delimiters, key order, `type:`, trailing newline). Extends the existing
+  `test_memex_remember_writes_claude_compatible_file` from "contains payload" to
+  an explicit golden-shape assertion.
+- **Read direction (hard, NOT skip-on-empty):** stage `golden-memory-section.md`
+  into a scratch sync-repo project memory dir; drive the binary's prefetch/search
+  with a query the golden entry should match; **assert it surfaces — fail (do not
+  skip) if it does not.** The `integration-smoke` job's purpose is to exercise the
+  binary with the embedding backend present, so an empty result is a real
+  regression, not an environmental skip (this is the explicit fix for the
+  skip-as-theater pattern the review flagged). A comment names the precondition.
 
 ## 4. Spec delta
 
-Add one requirement to the `hermes-sync-bridge` capability:
+One requirement added to `hermes-sync-bridge` (see the change's spec delta),
+worded to §2's corrected framing: semantic round-trip of the parsed entry,
+adapter-local L1 writer conforms to the shared reader, version-pin alignment for
+warm-cache/ranking stability, verified self-contained via a golden fixture.
 
-> **Requirement: Cross-adapter on-disk format is byte-compatible and verified**
-> The memory-file format memex-hermes writes SHALL be byte-compatible with the
-> shared `@jim80net/memex-core` read path used by every adapter, and the adapter
-> SHALL pin `@huggingface/transformers` and `@jim80net/memex-core` to ranges
-> aligned with the peer adapters. Verified by a committed golden fixture
-> (read + write + round-trip) and a version-pin alignment guard.
+## 5. Out of scope (explicit)
 
-Scenarios: (a) golden read conformance, (b) golden write conformance +
-round-trip, (c) transformers-version alignment fails loudly on independent bump,
-(d) binary reads a peer-written memory file (e2e).
-
-## 5. Out of scope
-
-- A live two-adapter CI lane running real memex-claude. The golden fixture is the
-  deliberate self-contained substitute (per the operator's Hermes-teardown
-  framing: the guarantee must hold *without* the peer being installed).
-- Numerical embedding-vector equality across adapters (would require running both
-  engines). The Tier-2 version-pin guard is the proxy: identical transformers +
-  model ⇒ identical vectors. Documented as the rationale.
-- Deep `loadCache`/`saveCache` round-trip from the hermes repo: those symbols are
-  not in memex-core's public `exports` map (only `.` is exported), and the cache
-  consumption logic is memex-core's own test responsibility. L2 compat is guarded
-  by the version pin (Tier 2), not by reaching into memex-core internals.
+- **A live two-adapter CI lane.** The golden fixture is the deliberate
+  self-contained substitute (matches the Hermes-teardown framing: the guarantee
+  must hold without the peer installed).
+- **Numerical embedding-vector equality across adapters** (needs both engines
+  running). Proxied by the Tier-2 resolved-version pin; and per §2(b) it is not
+  corpus-critical anyway (vectors regenerate from text).
+- **Fixing the #10 escaping contract** (writer/reader scalar grammar) — a
+  memex-core-ecosystem decision; this fixture *pins* the boundary and links it.
+- **Fixing the #11 conflict-policy spec/code mismatch** — pre-existing,
+  git-sync-conflict domain, needs memex-core coordination.
+- **Other memex-core-written on-disk artifacts** — `memex-telemetry.json`
+  (`version:1`), the project registry (`version:1`), session files, execution
+  traces. These are written by memex-core (not adapter-local), version-gated, and
+  either regenerable or runtime-only; their cross-adapter compatibility rides on
+  the same `@jim80net/memex-core` version the Tier-2 guard pins. Named here so the
+  coverage decision is auditable; no separate fixture warranted.
+- **Filesystem-level concerns** — CRLF/BOM and filename case-folding across OSes.
+  hermes writes LF + a single trailing newline + ASCII-safe filenames; the golden
+  body comparison asserts LF + single trailing newline. Cross-OS filename
+  case-collision (the `caseSensitive` project-id flag) is a sync-layer concern,
+  not a memory-file-format concern — out of scope, named.
 
 ## 6. Verification plan
 
 - `pnpm test` (vitest) — Tiers 1 + 2 green, deterministic, no network.
-- `pnpm typecheck` + `pnpm lint` — clean (new module + tests).
-- `pytest test/python` — unchanged green (writer extraction must not regress
-  `tool-remember` / `session-end` behavior; existing tests cover both).
+- `pnpm typecheck` + `pnpm lint` — clean.
+- `pytest test/python` — unchanged green (the writer extraction must not regress
+  `tool-remember` / `session-end`; new byte-level tests are the regression gate).
 - `MEMEX_E2E=1 … pytest test/e2e -c test/e2e/pytest.ini` with a built binary —
-  Tier 3 round-trip passes (also exercised by CI `integration-smoke`).
-- Manual: corrupt the golden body by one byte → Tier 1 write-conformance fails;
-  edit hermes's transformers pin → Tier 2 fails. (Confirms the guards bite.)
+  Tier 3 passes (also in CI `integration-smoke`).
+- Adversarial manual checks: corrupt the golden body one byte → Tier-1 write
+  conformance fails; edit hermes's transformers pin → Tier-2 fails; the #10
+  boundary test flips when #10 is fixed. (Confirms the guards bite.)
