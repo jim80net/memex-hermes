@@ -40,7 +40,10 @@ format legitimately changes, regenerate with that same input and update the
 expected values in the test in the same change:
 
 ```js
-import { formatMemoryEntry } from "../../src/core/memory-format.ts";
+// Run from this directory (test/fixtures/cross-adapter/); the repo root is
+// three levels up, so the import path is ../../../src/core/.
+import { writeFileSync } from "node:fs";
+import { formatMemoryEntry } from "../../../src/core/memory-format.ts";
 // FRONTMATTER_INPUT from test/ts/cross-adapter-compat.test.ts
 writeFileSync("golden-memory-frontmatter.md", formatMemoryEntry(FRONTMATTER_INPUT));
 ```
