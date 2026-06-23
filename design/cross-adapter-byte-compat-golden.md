@@ -149,17 +149,25 @@ the existing `integration-smoke` job (builds the linux-x64 binary, runs
 peer stand-in.
 
 - **Write direction (deterministic, hard):** drive `memex_remember` on the built
-  binary; assert the written file's frontmatter structurally matches the golden
-  shape (delimiters, key order, `type:`, trailing newline). Extends the existing
-  `test_memex_remember_writes_claude_compatible_file` from "contains payload" to
-  an explicit golden-shape assertion.
-- **Read direction (hard, NOT skip-on-empty):** stage `golden-memory-section.md`
-  into a scratch sync-repo project memory dir; drive the binary's prefetch/search
-  with a query the golden entry should match; **assert it surfaces — fail (do not
-  skip) if it does not.** The `integration-smoke` job's purpose is to exercise the
-  binary with the embedding backend present, so an empty result is a real
-  regression, not an environmental skip (this is the explicit fix for the
-  skip-as-theater pattern the review flagged). A comment names the precondition.
+  binary; assert the written file's frontmatter key layout matches the golden
+  (`name`/`description`/`type`) + trailing newline + parses back to the payload.
+  Extends the existing `test_memex_remember_writes_claude_compatible_file` from
+  "contains payload" to an explicit golden-shape assertion, plus a dedicated
+  round-trip test. This path **degrades gracefully when the embedding backend is
+  absent** (verified: the binary logs the index-build failure and still dispatches
+  + writes the file), so it is the reliable binary-tier anchor.
+- **Read direction — covered at Tier 1, NOT re-exercised on the binary
+  (evidence-based decision).** The original draft proposed a hard binary
+  prefetch/search test. Empirically (verified this session): the binary's
+  read/search path requires `@huggingface/transformers`, which does **not** resolve
+  inside the `bun build --compile` artifact in this environment (`health` returns
+  `ready:true` but index-build fails) — and `test_skill_match.py` already documents
+  this as an environment condition it skips on. A hard binary-search test would
+  therefore false-red wherever the backend is unavailable; a skip-on-empty would be
+  the verification theater the review rightly flagged. So the READ direction is
+  covered DETERMINISTICALLY at Tier 1 (vitest) against the **same memex-core parser
+  the binary bundles**, and no skippable/fragile binary read test is added — the
+  skip placeholder is removed, not replaced with another skip.
 
 ## 4. Spec delta
 

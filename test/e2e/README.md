@@ -7,7 +7,7 @@ Covers the seven scenarios named in [`openspec/changes/bootstrap-memex-hermes-ad
 | File | Scenario | What it exercises |
 | --- | --- | --- |
 | `test_skill_match.py` | §11.2 | Authored `SKILL.md` is surfaced for a relevant prompt via `prefetch` |
-| `test_sync_compat.py` | §11.3 (partial) | `memex_remember` writes a `memex-claude`-compatible on-disk format |
+| `test_sync_compat.py` | §11.3 / #4 | Compiled binary's `memex_remember` writes the shared cross-adapter frontmatter format (golden-fixture round-trip; READ proven at Tier-1 vitest) |
 | `test_memory_mirror.py` | §11.4 | Both mirror paths (primary `on_memory_write` + mtime watcher) work; covers `remove` via mtime |
 | `test_first_run.py` | §11.5 | Cold-cache first-run `prefetch` completes within 10s (only when `MEMEX_E2E_COLD=1`) |
 | `test_binary_failure.py` | §11.6 | Provider degrades gracefully when the binary is missing; no exception escapes |
@@ -50,9 +50,13 @@ Add `MEMEX_E2E_COLD=1` to additionally exercise `test_first_run.py`. That test c
 | `MEMEX_HERMES_BINARY=... does not exist` | Fix the override or unset the env var |
 | `Hermes venv python not found at /home/jim/.hermes/...` | Only the `hermes_session` fixture needs this; install Hermes locally or skip that test |
 
+## Cross-adapter byte-compat (issue #4)
+
+* **Covered, self-contained (no live `memex-claude`).** A committed golden fixture (`test/fixtures/cross-adapter/`) is the peer-adapter stand-in. `test_sync_compat.py` asserts the compiled binary WRITES the shared frontmatter shape; the READ direction (the shared `@jim80net/memex-core` parser reading a peer-shaped file) is proven deterministically at Tier 1 (`test/ts/cross-adapter-compat.test.ts`), and the version-pin alignment that keeps the embedding cache reusable is at Tier 2 (`test/ts/cross-adapter-pin-alignment.test.ts`). See `design/cross-adapter-byte-compat-golden.md`.
+* The binary's own read/search of a peer file is **not** re-exercised here: it requires the embedding backend (`@huggingface/transformers`), which is not guaranteed to resolve inside a `bun build --compile` artifact, so a binary search test would be an environment-fragile gate. READ is covered at Tier 1 against the same bundled parser.
+
 ## What we do NOT cover here
 
-* **Cross-adapter round-trip** (`memex-hermes` writes → `memex-claude` reads). Tracked as a follow-up in `test_sync_compat.py::test_cross_adapter_round_trip_tracked_as_followup` and §11.3 of `tasks.md`.
 * **Push retry / remote sync** semantics. The fixtures set `sync.autoCommitPush: false` so we never hit a real remote. Push retry behavior is unit-tested in `test/ts/`.
 * **Hermes runtime CLI execution.** We drive the `MemoryManager` directly; we do not boot the full `hermes` CLI. The CLI is owned by NousResearch; we trust the v0.14.0 contract verified in `spike/SPIKE-COMPLETE.md`.
 

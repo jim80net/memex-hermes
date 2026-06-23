@@ -17,13 +17,13 @@ import { initSyncRepo } from "@jim80net/memex-core";
 import type { HermesConfig } from "../core/config.ts";
 import type { HermesSessionEndArgs, HermesSessionEndOutput } from "../core/envelope.ts";
 import type { HermesPaths } from "../core/hermes-paths.ts";
+import { formatMemoryEntry } from "../core/memory-format.ts";
 import {
   detectBranch,
   isSessionProjectId,
   pushWithRetry,
   resolveHermesProjectId,
 } from "../core/sync-helpers.ts";
-import { safeYamlScalar } from "../core/yaml-frontmatter.ts";
 import { getState } from "../state.ts";
 
 const execFileAsync = promisify(execFile);
@@ -227,17 +227,14 @@ async function extractLearnings(
 // relevant seam (LLM-provided name/description must not corrupt the file).
 export function formatLearningFile(learning: ExtractedLearning): string {
   // name/description are LLM-provided — a colon, quote, or newline would corrupt
-  // the YAML frontmatter, so emit them as escaped double-quoted scalars.
-  return [
-    "---",
-    `name: ${safeYamlScalar(learning.name)}`,
-    `description: ${safeYamlScalar(learning.description)}`,
-    "type: session-learning",
-    "---",
-    "",
-    learning.body,
-    "",
-  ].join("\n");
+  // the YAML frontmatter; the shared formatter escapes both. The body is passed
+  // verbatim (this path does NOT trim, preserving the prior on-disk bytes).
+  return formatMemoryEntry({
+    name: learning.name,
+    description: learning.description,
+    type: "session-learning",
+    body: learning.body,
+  });
 }
 
 function slugify(name: string): string {

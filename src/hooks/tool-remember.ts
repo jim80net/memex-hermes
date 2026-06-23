@@ -19,8 +19,8 @@ import type {
   HermesToolScope,
 } from "../core/envelope.ts";
 import type { HermesPaths } from "../core/hermes-paths.ts";
+import { formatMemoryEntry } from "../core/memory-format.ts";
 import { isSessionProjectId, resolveHermesProjectId } from "../core/sync-helpers.ts";
-import { safeYamlScalar } from "../core/yaml-frontmatter.ts";
 import { getState } from "../state.ts";
 
 export async function handleToolRemember(
@@ -176,21 +176,17 @@ async function resolveTargetDir(
 }
 
 function formatMemory(content: string): string {
-  const name = slugify(extractTitle(content));
-  const description = extractDescription(content);
-  // name is slug-safe ([a-z0-9-]), but description is the first content line and
-  // may carry a colon/quote that would corrupt the frontmatter — emit both as
-  // escaped double-quoted YAML scalars for a single, consistent safe path.
-  return [
-    "---",
-    `name: ${safeYamlScalar(name)}`,
-    `description: ${safeYamlScalar(description)}`,
-    "type: memory",
-    "---",
-    "",
-    content.trim(),
-    "",
-  ].join("\n");
+  // The frontmatter block is the shared cross-adapter format (memory-format.ts).
+  // The body trim stays HERE (the caller owns body normalization); the formatter
+  // treats body as opaque, so this path's on-disk bytes are unchanged by the
+  // extraction. name is slug-safe ([a-z0-9-]); description is the first content
+  // line and may carry a colon/quote — the shared formatter escapes both.
+  return formatMemoryEntry({
+    name: slugify(extractTitle(content)),
+    description: extractDescription(content),
+    type: "memory",
+    body: content.trim(),
+  });
 }
 
 function extractTitle(content: string): string {

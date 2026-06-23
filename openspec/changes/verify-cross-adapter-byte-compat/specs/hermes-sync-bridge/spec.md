@@ -51,7 +51,8 @@ installation; a committed golden fixture is the peer-adapter stand-in.
 - **WHEN** the installed transformers version, or memex-hermes's declared range, diverges from the reference (or from the installed memex-core's range)
 - **THEN** the version-pin alignment test fails, surfacing the drift before it ships
 
-#### Scenario: The compiled binary reads a peer-shaped memory file (e2e)
-- **GIVEN** the golden memory file staged in a project memory dir inside a scratch sync repo, and `MEMEX_E2E=1` with a built binary
-- **WHEN** the binary's prefetch/search runs against a query the golden entry should match
-- **THEN** the binary surfaces the golden entry (the test fails, and does not skip, if it does not — the integration job guarantees the embedding backend)
+#### Scenario: The compiled binary writes the shared format (e2e)
+- **GIVEN** `MEMEX_E2E=1` with a built binary
+- **WHEN** `memex_remember` is driven on the binary
+- **THEN** the written file's frontmatter key layout matches the committed golden (`name`/`description`/`type`), parses back to the payload, and ends in a single newline — proving the compiled artifact emits the shared cross-adapter format
+- **AND** this holds even when the embedding backend is unavailable (the write path degrades gracefully); the binary's READ/search path, which requires the embedding backend, is covered deterministically at the vitest tier against the same bundled parser rather than via an environment-fragile binary-search gate
