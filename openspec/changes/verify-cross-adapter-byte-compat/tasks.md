@@ -30,5 +30,5 @@
 
 ## 6. Spec + close-out
 - [x] 6.1 `openspec validate verify-cross-adapter-byte-compat --strict` passes.
-- [ ] 6.2 Review trio (systems-review + open-code-review + STORM) on the implementation diff — iterate clean.
-- [ ] 6.3 Open PR to `jim80net/memex-hermes` referencing #4 (+ #10/#11 as discovered tech debt); surface to hydra-ops; NO self-merge per fleet doctrine.
+- [x] 6.2 Review trio (systems-review + open-code-review + STORM) on the implementation diff — systems-review APPROVED; OCR + STORM findings addressed (#10/#12 pinned, README/spec/design reconciled).
+- [x] 6.3 Open PR to `jim80net/memex-hermes` referencing #4 (+ #10/#11/#12 discovered tech debt) → PR #13; surface to hydra-ops; NO self-merge per fleet doctrine. (CI + cubic gates pending confirmation.)
