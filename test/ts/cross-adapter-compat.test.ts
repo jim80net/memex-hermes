@@ -103,9 +103,11 @@ describe("cross-adapter memory-file conformance (#4)", () => {
     });
   });
 
-  describe("section golden (L1b — mirrored USER.md shape, ## heading + Triggers:)", () => {
-    // Synthetic now; to be validated against the operator's real
-    // ~/.hermes/memories/USER.md when openclaude-migration delivers it.
+  describe("section golden (L1b — `## heading` + `Triggers:` multi-section format)", () => {
+    // The section-based memory format (a real memex-core memory shape). NOTE:
+    // this is NOT the shape of a Hermes native USER.md — the real USER.md is
+    // heading-less prose (see the prose block below + #12); this golden exercises
+    // the `## + Triggers:` parser path that memex-format memory files use.
     const golden = readFixture("golden-memory-section.md");
 
     it("parses every ## section with its Triggers as queries", () => {
@@ -127,6 +129,44 @@ describe("cross-adapter memory-file conformance (#4)", () => {
     it("is LF-only, BOM-free", () => {
       expect(golden.includes("\r")).toBe(false);
       expect(golden.charCodeAt(0)).not.toBe(0xfeff);
+    });
+  });
+
+  describe("prose shape (real USER.md — heading-less, frontmatter-less)", () => {
+    // PINNED current behavior (#12): a Hermes native USER.md is heading-less
+    // prose, mirrored verbatim into the sync repo. memex-core's parser yields
+    // ZERO indexable entries for it — so mirrored USER.md prose is not surfaced
+    // by the memex layer (consistent across every adapter, so byte-compat is not
+    // violated; the open question is whether it SHOULD be surfaced — #12). The
+    // fixture is generic prose: the real USER.md is the operator's private memory
+    // and is not committed to this public repo.
+    const golden = readFixture("golden-memory-prose.md");
+
+    it("yields zero indexable entries (not semantically indexed)", () => {
+      expect(parseMemoryFile(golden, "USER.md")).toEqual([]);
+      expect(parseFrontmatter(golden).meta).toEqual({});
+    });
+  });
+
+  describe("type discriminator round-trips (memory vs session-learning)", () => {
+    it("session-learning type survives write → parseFrontmatter", () => {
+      const out = formatMemoryEntry({
+        name: "lesson",
+        description: "a lesson learned",
+        type: "session-learning",
+        body: "always trace the runtime path",
+      });
+      expect(parseFrontmatter(out).meta.type).toBe("session-learning");
+    });
+
+    it("memory type survives write → parseFrontmatter", () => {
+      const out = formatMemoryEntry({
+        name: "mem",
+        description: "a memory",
+        type: "memory",
+        body: "b",
+      });
+      expect(parseFrontmatter(out).meta.type).toBe("memory");
     });
   });
 

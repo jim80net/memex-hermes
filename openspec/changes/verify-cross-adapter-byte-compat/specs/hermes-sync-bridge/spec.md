@@ -46,6 +46,11 @@ installation; a committed golden fixture is the peer-adapter stand-in.
 - **WHEN** it is written via the shared formatter and read back via the shared parser
 - **THEN** the test asserts the CURRENT (non-round-tripping) behavior and links the tracking issue, so the boundary is documented and flips to a fidelity assertion when the contract is fixed
 
+#### Scenario: Heading-less mirrored prose is a pinned boundary
+- **GIVEN** a heading-less, frontmatter-less memory file (the real `~/.hermes/memories/USER.md` shape, mirrored verbatim)
+- **WHEN** it is parsed via `parseMemoryFile`
+- **THEN** it yields zero indexable entries — the suite pins this current behavior (mirrored USER.md prose is not surfaced by the memex layer; consistent across adapters, so byte-compat holds) and links the open design question on whether it should be surfaced
+
 #### Scenario: Independent transformers bump fails the alignment guard
 - **GIVEN** the committed cross-adapter reference (resolved transformers version + declared ranges)
 - **WHEN** the installed transformers version, or memex-hermes's declared range, diverges from the reference (or from the installed memex-core's range)

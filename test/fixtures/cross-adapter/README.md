@@ -18,15 +18,19 @@ derivatives.
 | File | Layer | What it proves | Provenance |
 |------|-------|----------------|------------|
 | `golden-memory-frontmatter.md` | L1a — individual memory file (`memex_remember` / session-learning shape) | the shared memex-core parser (`parseFrontmatter` + `parseMemoryFile`) reads hermes's frontmatter write shape to the exact expected entry; the writer reproduces these bytes | **generated from the real `formatMemoryEntry`** (`src/core/memory-format.ts`) — see regeneration below |
-| `golden-memory-section.md` | L1b — section-style file (`## heading` + `Triggers:`), the mirrored `~/.hermes/memories/USER.md` shape | the section-fallback parser reads multi-section memory + `Triggers:`→`queries` | hand-authored to the documented section format; **to be validated against the operator's real `~/.hermes/memories/USER.md`** (openclaude-migration handoff) |
+| `golden-memory-section.md` | L1b — section-style memory file (`## heading` + `Triggers:`) | the section-fallback parser reads a multi-section memory + `Triggers:`→`queries`. This is a real memex memory format — NOT the shape of a Hermes native USER.md (that is heading-less prose; see the next row) | hand-authored to the documented section format |
+| `golden-memory-prose.md` | real `~/.hermes/memories/USER.md` shape — heading-less, frontmatter-less prose | PINNED current behavior (#12): such prose yields ZERO indexable entries from `parseMemoryFile` — mirrored USER.md prose is not surfaced by the memex layer (consistent across adapters, so byte-compat holds; whether it SHOULD be surfaced is #12) | **generic** prose — the real USER.md is the operator's private memory and is not committed to this public repo |
 
 ## Consumed by
 
 - `test/ts/cross-adapter-compat.test.ts` (Tier 1, always-on vitest) — read /
-  write / round-trip conformance + the pinned `#10` escaping boundary.
-- `test/e2e/test_sync_compat.py` (Tier 3, `MEMEX_E2E=1`) — the compiled binary
-  reads `golden-memory-section.md` and its `memex_remember` write matches the
-  frontmatter golden's shape.
+  write / round-trip conformance for the frontmatter + section goldens, the
+  pinned prose-shape boundary (#12), the `type` round-trip, and the pinned `#10`
+  escaping boundary.
+- `test/e2e/test_sync_compat.py` (Tier 3, `MEMEX_E2E=1`) — reads only
+  `golden-memory-frontmatter.md` (via the frontmatter key layout) and asserts the
+  compiled binary's `memex_remember` WRITE matches that shape. (The binary's READ
+  path is covered at Tier 1, not here — see the module docstring.)
 
 ## Regenerating `golden-memory-frontmatter.md`
 

@@ -45,7 +45,8 @@ a "corpus survives" guard to a "warm-cache reuse + ranking stability" guard.
 | # | Layer | Read owner | Write owner | Corpus-critical? | hermes drift risk |
 |---|-------|-----------|-------------|------------------|-------------------|
 | **L1a** | Frontmatter memory file (`---\nname/description/type\n---\n\n<body>`) | memex-core `parseFrontmatter` / `parseMemoryFile` | **adapter-local** — hermes `formatMemory` / `formatLearningFile` | **YES** | **HIGH** — only layer hermes writes itself |
-| **L1b** | Section-style memory file (`## heading` + `Triggers:`), incl. mirrored `USER.md` | memex-core `parseMemoryFile` section fallback | passthrough mirror of Hermes's `USER.md` (`_mirror.ts`, verbatim) | **YES** | LOW (verbatim) — but the *read* path must parse it |
+| **L1b** | Section-style memory file (`## heading` + `Triggers:`) | memex-core `parseMemoryFile` section fallback | (memex-format memory files) | **YES** | LOW — the *read* path must parse it |
+| **L1c** | Heading-less prose (real mirrored `USER.md`) | memex-core `parseMemoryFile` → `[]` (not indexed) | passthrough mirror of Hermes's `USER.md` (`_mirror.ts`, verbatim) | open (#12) | LOW (verbatim) — but currently NOT surfaced by the memex layer |
 | **L2** | `memex-cache.json` (`CACHE_VERSION=2`) | memex-core `loadCache` | memex-core `saveCache` (via `SkillIndex`) | NO (regenerable) | LOW |
 | **L3** | Embedding vectors in L2 | memex-core `LocalEmbeddingProvider` (`@huggingface/transformers`) | same | NO (regenerable) | SILENT (version skew → different vectors → ranking drift) |
 
@@ -81,10 +82,16 @@ Runs in the `typescript` CI job. Deterministic; no binary, no model download.
 - `golden-memory-frontmatter.md` — canonical individual memory file (L1a),
   **adversarial**: description carries a `:`, a non-ASCII char, and a
   leading/trailing space (the cases that MUST round-trip).
-- `golden-memory-section.md` — section-style file (L1b), the `USER.md` shape
-  (`## heading` + `Triggers:`), to be validated against the operator's real
-  `~/.hermes/memories/USER.md` (321B) when openclaude-migration hands it over;
-  the synthetic golden lands now so the path is covered immediately.
+- `golden-memory-section.md` — section-style file (L1b), `## heading` +
+  `Triggers:` (a real memex memory format). NOTE (verified this session): the
+  real `~/.hermes/memories/USER.md` is heading-less, frontmatter-less prose, NOT
+  this section shape — so this golden exercises the section parser path, not
+  "the USER.md shape."
+- `golden-memory-prose.md` — the real heading-less USER.md shape (generic prose;
+  the operator's actual USER.md is private and not committed to this public
+  repo). PINNED: `parseMemoryFile` yields `[]` for it — mirrored USER.md prose is
+  not surfaced by the memex layer (consistent across adapters → byte-compat
+  holds; whether it SHOULD be surfaced is tracked in **#12**).
 - `README.md` — provenance, what each fixture proves, regeneration steps.
 
 **Read conformance:** parse each golden via BOTH the function hermes actually
