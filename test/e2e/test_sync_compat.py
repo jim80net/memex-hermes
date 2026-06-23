@@ -1,24 +1,24 @@
-"""§11.3 (partial) — Cross-adapter sync-repo on-disk compatibility.
+"""Cross-adapter on-disk compatibility — the COMPILED-binary (Tier 3) tier of
+issue #4.
 
-Full cross-adapter interop (memex-hermes writes → memex-claude
-reads) requires both adapters running side-by-side; this fixture
-only owns memex-hermes. We exercise the WRITE side here and assert
-the on-disk format is byte-compatible with what memex-claude expects
-to consume.
+The product invariant — a memory authored under one adapter is read back
+unchanged under another — is verified self-contained (no live memex-claude): a
+committed golden fixture is the peer-adapter stand-in. This module owns the
+WRITE direction against the real bun-compiled binary:
 
-What we verify:
+1. ``memex_remember`` writes a memory file under the HOME-scoped sync repo.
+2. The produced file is in the SAME shared frontmatter shape as the committed
+   golden (``test/fixtures/cross-adapter/golden-memory-frontmatter.md``) that the
+   shared ``@jim80net/memex-core`` parser — used by every adapter — reads.
 
-1. ``memex_remember`` from a memex-hermes session writes a memory
-   file at ``<sync_repo>/projects/<id>/memory/<filename>``.
-2. The file has the structural shape memex-claude consumes:
-   markdown body with optional frontmatter, encoded as UTF-8.
-
-What we do NOT verify here (tracked as a TODO):
-
-* The end-to-end "memex-claude session reads this file and surfaces
-  it via search" round-trip. That requires installing + running
-  memex-claude from this test, which we defer to the cross-adapter
-  CI lane.
+The READ direction (the shared parser reading a peer-shaped file) is proven
+DETERMINISTICALLY at Tier 1 (``test/ts/cross-adapter-compat.test.ts``) against
+the same parser the binary bundles, and the version-pin alignment that keeps the
+embedding cache reusable is at Tier 2 (``test/ts/cross-adapter-pin-alignment.test.ts``).
+The binary's own read/search path requires the embedding backend, which is not
+guaranteed to resolve inside a ``bun build --compile`` artifact, so it is not
+re-exercised here (it would be an environment-fragile gate); WRITE degrades
+gracefully when the backend is absent, so it is the reliable binary-tier anchor.
 """
 
 from __future__ import annotations
@@ -30,6 +30,56 @@ import pytest
 from fixtures import MemexBinaryInfo
 
 from memex_hermes.provider import MemexProvider
+
+# The committed cross-adapter golden fixtures live alongside the ts conformance
+# suite; this e2e tier asserts the COMPILED binary writes that same shape.
+_FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "cross-adapter"
+
+
+def _frontmatter_keys(text: str) -> list[str]:
+    """Ordered top-level keys of a leading ``---``-delimited frontmatter block.
+
+    Returns ``[]`` when there is no leading frontmatter block. Used to assert the
+    binary's on-disk shape matches the golden's key layout.
+    """
+    if not text.startswith("---\n"):
+        return []
+    end = text.find("\n---", 4)
+    if end == -1:
+        return []
+    keys: list[str] = []
+    for line in text[4:end].splitlines():
+        if ":" in line and not line.startswith((" ", "\t", "-")):
+            keys.append(line.split(":", 1)[0].strip())
+    return keys
+
+
+def _golden_frontmatter_keys() -> list[str]:
+    golden = (_FIXTURE_DIR / "golden-memory-frontmatter.md").read_text(encoding="utf-8")
+    return _frontmatter_keys(golden)
+
+
+def _await_written_md(sync_repo: Path, timeout_s: float = 5.0) -> Path:
+    """Return the most-recently-written ``*.md`` under ``sync_repo``.
+
+    memex_remember is synchronous, but tolerate a brief gap in case the binary
+    spawns a worker. Fails the test if nothing appears within ``timeout_s``.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout_s
+    candidates: list[Path] = []
+    while time.monotonic() < deadline and not candidates:
+        if sync_repo.is_dir():
+            candidates = [p for p in sync_repo.rglob("*.md") if p.is_file()]
+        if not candidates:
+            time.sleep(0.05)
+    assert candidates, (
+        "memex_remember did not produce any .md file in the sync repo. "
+        f"Tree: {list(sync_repo.rglob('*')) if sync_repo.is_dir() else '(missing)'}"
+    )
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return candidates[0]
 
 
 def _build_provider(
@@ -107,49 +157,79 @@ def test_memex_remember_writes_claude_compatible_file(
     # The binary writes memex_remember entries under the HOME-scoped
     # sync repo: $HOME/.local/share/memex-hermes/.
     sync_repo = home_scope / ".local" / "share" / "memex-hermes"
-    # The remember tool is sync, so the file should exist immediately;
-    # tolerate a brief gap in case the binary spawns a worker.
-    import time
-    deadline = time.monotonic() + 5.0
-    candidates: list[Path] = []
-    while time.monotonic() < deadline and not candidates:
-        if sync_repo.is_dir():
-            candidates = [p for p in sync_repo.rglob("*.md") if p.is_file()]
-        if not candidates:
-            time.sleep(0.05)
-    assert candidates, (
-        "memex_remember did not produce any .md file in the sync repo. "
-        f"Tree: {list(sync_repo.rglob('*')) if sync_repo.is_dir() else '(missing)'}"
-    )
-    # Pick the most recently modified file as the target.
-    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    target = candidates[0]
+    target = _await_written_md(sync_repo)
 
     body = target.read_text(encoding="utf-8")
     assert payload in body, (
         f"remembered payload not present in produced file {target}: {body!r}"
     )
 
-    # Structural format: either the file starts with `---` (frontmatter)
-    # or with markdown content directly — both are valid memex-claude
-    # inputs. The negative invariant is "no binary garbage / unicode
-    # smuggling / wrong newlines that would break claude's parser."
+    # Cross-adapter shape: the binary writes the SAME frontmatter key layout as
+    # the committed golden the shared @jim80net/memex-core parser reads.
+    assert _frontmatter_keys(body) == _golden_frontmatter_keys() == [
+        "name",
+        "description",
+        "type",
+    ], f"binary frontmatter shape diverged from the golden: {body!r}"
+    # No binary garbage / unicode smuggling / wrong newlines that would break
+    # the shared parser.
     assert body.endswith("\n"), "expected trailing newline (memex-claude convention)"
     assert "\x00" not in body, "file must be plain text, not binary"
 
     provider.shutdown()
 
 
-def test_cross_adapter_round_trip_tracked_as_followup() -> None:
-    """Documentation-only check that the cross-adapter round-trip is
-    a known follow-up.
+def test_binary_write_round_trips_through_shared_format(
+    hermes_home: Path,
+    tmp_path: Path,
+    memex_binary_path: MemexBinaryInfo,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The COMPILED binary's memex_remember output is the cross-adapter format.
 
-    The end-to-end check "memex-hermes writes; memex-claude reads"
-    requires both adapters running side-by-side and is deferred to
-    the cross-adapter CI lane. This test pins the expectation so a
-    future reader knows the §11.3 coverage in this file is partial.
+    Self-contained round-trip (no live memex-claude): the binary writes a
+    memory; we assert the produced file is in the same shared frontmatter shape
+    as the committed golden
+    (``test/fixtures/cross-adapter/golden-memory-frontmatter.md``) that the
+    shared ``@jim80net/memex-core`` parser — used by every adapter — reads.
+
+    The READ direction (the shared parser reading a peer-shaped file) is proven
+    DETERMINISTICALLY at Tier 1 (``test/ts/cross-adapter-compat.test.ts``)
+    against the same parser the binary bundles. The binary's own read/search path
+    requires the embedding backend (``@huggingface/transformers``), which is not
+    guaranteed to resolve inside a ``bun build --compile`` artifact — exercising
+    it here would be an environment-fragile gate, so we cover READ at Tier 1 and
+    WRITE (which degrades gracefully when the backend is absent) here.
     """
-    pytest.skip(
-        "cross-adapter round-trip with memex-claude is a tracked follow-up; "
-        "see tasks.md §11.3 — requires memex-claude installed alongside"
+    home_scope = tmp_path / "home_scope"
+    home_scope.mkdir()
+    provider = _build_provider(hermes_home, home_scope, memex_binary_path, monkeypatch)
+
+    payload = (
+        "always trace the production runtime path end-to-end before declaring a "
+        "daemon PR merge-ready: tests green is necessary, not sufficient."
     )
+    result = provider.handle_tool_call(
+        "memex_remember",
+        {"content": payload, "scope": "global"},
+    )
+    parsed = json.loads(result)
+    assert isinstance(parsed, dict), f"tool result must be a JSON object: {result!r}"
+
+    sync_repo = home_scope / ".local" / "share" / "memex-hermes"
+    target = _await_written_md(sync_repo)
+    body = target.read_text(encoding="utf-8")
+
+    # Round-trip shape: the binary's on-disk frontmatter matches the golden's
+    # key layout exactly, and parses back to the payload + memory type.
+    assert _frontmatter_keys(body) == _golden_frontmatter_keys() == [
+        "name",
+        "description",
+        "type",
+    ], f"binary frontmatter shape diverged from the golden: {body!r}"
+    frontmatter = body.split("\n---", 1)[0]
+    assert "type: memory" in frontmatter, f"expected memory type in frontmatter: {body!r}"
+    assert payload in body, f"payload not preserved in binary output: {body!r}"
+    assert body.endswith("\n") and "\x00" not in body
+
+    provider.shutdown()
