@@ -29,8 +29,8 @@ The Python ↔ binary boundary is a typed JSON envelope encoded in **`src/core/e
 
 ## Critical references
 
-- **Capability specs** (the permanent contract — Requirements + Scenarios for every behavior): `openspec/changes/bootstrap-memex-hermes-adapter/specs/{hermes-memory-provider,hermes-engine-events,hermes-path-resolution,hermes-sync-bridge,hermes-plugin-packaging,memex-tool-surface}/spec.md`. The change is still **active/unpromoted** while PR #2 is open; promotion to `openspec/specs/` + archival of the change happen at merge (tasks.md §14.6).
-- **Bootstrap change** (proposal, design with D1–D10 decisions, tasks, the R1–R7 spike findings inventory): `openspec/changes/bootstrap-memex-hermes-adapter/` (archived to `openspec/changes/archive/` after merge).
+- **Capability specs** (the permanent contract — Requirements + Scenarios for every behavior): `openspec/specs/{hermes-memory-provider,hermes-engine-events,hermes-path-resolution,hermes-sync-bridge,hermes-plugin-packaging,memex-tool-surface}/spec.md` (promoted from the bootstrap change on archive, 2026-06-23).
+- **Bootstrap change** (proposal, design with D1–D10 decisions, tasks, the R1–R7 spike findings inventory): `openspec/changes/archive/2026-06-23-bootstrap-memex-hermes-adapter/` (archived after the PR #2 merge).
 - **User docs**: `README.md` (intro + quickstart), `USAGE.md` (full config + tool + sync reference), `CONTRIBUTING.md` (dev setup + maintenance policy on Hermes upgrades).
 
 ## Development
@@ -77,7 +77,7 @@ All Python code under `memex_hermes/` MUST pass `mypy --strict`. Notable rules (
 
 ## Maintenance: source-diff on Hermes upgrades
 
-When the upstream Hermes Agent is upgraded across a minor or major version, the `MemoryProvider` ABC contract may shift. The cheapest, most authoritative check is a **source diff** against the verified Hermes v0.14.0 baseline (captured in the R1–R7 inventory under `openspec/changes/bootstrap-memex-hermes-adapter/`, archived to `openspec/changes/archive/` after merge):
+When the upstream Hermes Agent is upgraded across a minor or major version, the `MemoryProvider` ABC contract may shift. The cheapest, most authoritative check is a **source diff** against the verified Hermes v0.14.0 baseline (captured in the R1–R7 inventory under `openspec/changes/archive/2026-06-23-bootstrap-memex-hermes-adapter/`):
 
 1. On the upgraded host, read `agent/memory_provider.py`, `agent/memory_manager.py`, `plugins/memory/__init__.py`, and `agent/agent_init.py` from the live Hermes install.
 2. Diff their signatures and dispatch wiring against the R1–R7 baseline.
