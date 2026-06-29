@@ -1,16 +1,20 @@
 // Hermes.tool-remember — write a memory entry into the project memory dir
-// (NOT MEMORY.md), report `{written, synced}`.
+// (NOT MEMORY.md), then commit + (gated) push it; report `{written, committed,
+// synced}`.
 //
-// `synced` is an ELIGIBILITY prediction — true only when sync.enabled AND the
-// project ID is not in the `_session/*` namespace. NOTE: the entry's commit +
-// push wiring (so an eligible entry actually reaches the remote) is tracked in
-// issue #6; today this handler only writes the file into the sync-repo working
-// tree. An explicit `projectName` promotes the write into the named project —
-// D7 / memex-tool-surface "Promotion to a named project via memex_remember".
+// `synced` is a CONFIRMATION — true only when the entry was committed AND pushed
+// to the remote on this call (sync.enabled + a configured repo + a push-eligible
+// project id + autoCommitPush + the push succeeded). `committed` is true when the
+// entry was committed to the local sync repo; a `committed:true, synced:false`
+// result means it is committed locally and will ride the next successful push by
+// any writer (#6). The commit + push go through the shared `commitAndMaybePush`
+// policy (same path session-end uses). An explicit `projectName` promotes the
+// write into the named project — D7 / memex-tool-surface "Promotion to a named
+// project via memex_remember".
 
 import { randomBytes } from "node:crypto";
 import { mkdir, realpath, writeFile } from "node:fs/promises";
-import { join, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import type { Logger } from "@jim80net/memex-core";
 import type { HermesConfig } from "../core/config.ts";
 import type {
@@ -20,7 +24,7 @@ import type {
 } from "../core/envelope.ts";
 import type { HermesPaths } from "../core/hermes-paths.ts";
 import { formatMemoryEntry } from "../core/memory-format.ts";
-import { isSessionProjectId, resolveHermesProjectId } from "../core/sync-helpers.ts";
+import { commitAndMaybePush, resolveHermesProjectId } from "../core/sync-helpers.ts";
 import { getState } from "../state.ts";
 
 export async function handleToolRemember(
@@ -66,14 +70,25 @@ export async function handleToolRemember(
   const body = formatMemory(args.content);
   await writeFile(filePath, body, "utf-8");
 
-  const synced =
-    config.sync.enabled &&
-    config.sync.repo.length > 0 &&
-    (projectId === null || !isSessionProjectId(projectId));
+  // Commit + push the entry via the shared policy. The sync-turn mtime-watcher
+  // only watches MEMORY.md/USER.md, so without this a memex-remember-*.md never
+  // reached the remote — `synced` was an eligibility prediction, not a fact.
+  // Commit only this file (its repo-relative path) so a concurrent writer's
+  // staged changes are never swept in.
+  const result = await commitAndMaybePush({
+    syncRepoDir: paths.syncRepoDir,
+    addPaths: [relative(paths.syncRepoDir, filePath)],
+    message: `memex-hermes memex_remember: ${projectId ?? "global"}`,
+    projectId,
+    sync: config.sync,
+    logger,
+  });
 
-  logger?.info(`memex-hermes[remember]: wrote ${filePath} synced=${synced}`);
+  logger?.info(
+    `memex-hermes[remember]: wrote ${filePath} committed=${result.committed} synced=${result.pushed}`,
+  );
 
-  return { written: filePath, synced };
+  return { written: filePath, committed: result.committed, synced: result.pushed };
 }
 
 // ---------------------------------------------------------------------------

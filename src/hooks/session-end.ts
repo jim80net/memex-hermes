@@ -8,25 +8,15 @@
 // is delegated to mirrorAndCommit indirectly — we write the file then let
 // the next Hermes.sync-turn pick the change up via the normal sync flow.
 
-import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import type { Logger } from "@jim80net/memex-core";
-import { initSyncRepo } from "@jim80net/memex-core";
 import type { HermesConfig } from "../core/config.ts";
 import type { HermesSessionEndArgs, HermesSessionEndOutput } from "../core/envelope.ts";
 import type { HermesPaths } from "../core/hermes-paths.ts";
 import { formatMemoryEntry } from "../core/memory-format.ts";
-import {
-  detectBranch,
-  isSessionProjectId,
-  pushWithRetry,
-  resolveHermesProjectId,
-} from "../core/sync-helpers.ts";
+import { commitAndMaybePush, resolveHermesProjectId } from "../core/sync-helpers.ts";
 import { getState } from "../state.ts";
-
-const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -92,43 +82,20 @@ export async function handleSessionEnd(
     }
   }
 
-  if (written > 0 && config.sync.enabled && config.sync.repo.length > 0) {
-    let committed = false;
-    try {
-      await initSyncRepo(config.sync, paths.syncRepoDir);
-      await runGit(["add", `projects/${projectId}/memory`], paths.syncRepoDir);
-      await runGit(
-        [
-          "commit",
-          "-m",
-          `memex-hermes session-learnings: ${written} new entr${written === 1 ? "y" : "ies"}`,
-        ],
-        paths.syncRepoDir,
-      );
-      committed = true;
-    } catch (err) {
-      logger?.warn(`memex-hermes[session-end]: commit failed: ${errMsg(err)}`);
-    }
-
-    // Push the learnings to the remote. Without this they sat in the local
-    // sync repo forever: the next sync-turn mtime-watcher only watches
-    // MEMORY.md / USER.md, so session-learning-*.md never reached origin. Push
-    // is suppressed for `_session/*` project IDs (D7 / C12) and gated on
-    // autoCommitPush, mirroring the memory-write/mtime mirror path. Reuses the
-    // shared rebase-retry + no-force-push helper.
-    if (committed && config.sync.autoCommitPush && !isSessionProjectId(projectId)) {
-      try {
-        const branch = await detectBranch(paths.syncRepoDir);
-        await pushWithRetry(
-          paths.syncRepoDir,
-          branch,
-          { pushRetries: config.sync.pushRetries, baseBackoffMs: 200 },
-          logger,
-        );
-      } catch (err) {
-        logger?.warn(`memex-hermes[session-end]: push failed: ${errMsg(err)}`);
-      }
-    }
+  // Commit + push the learnings via the shared policy. Without this they sat in
+  // the local sync repo forever: the sync-turn mtime-watcher only watches
+  // MEMORY.md / USER.md, so session-learning-*.md never reached origin. Push is
+  // suppressed for `_session/*` project IDs (D7 / C12) and gated on
+  // autoCommitPush (the helper handles both), with rebase-retry + no force-push.
+  if (written > 0) {
+    await commitAndMaybePush({
+      syncRepoDir: paths.syncRepoDir,
+      addPaths: [`projects/${projectId}/memory`],
+      message: `memex-hermes session-learnings: ${written} new entr${written === 1 ? "y" : "ies"}`,
+      projectId,
+      sync: config.sync,
+      logger,
+    });
   }
 
   return { written };
@@ -243,10 +210,6 @@ function slugify(name: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 50);
-}
-
-async function runGit(args: string[], cwd: string): Promise<void> {
-  await execFileAsync("git", args, { cwd, timeout: 30_000 });
 }
 
 function errMsg(err: unknown): string {

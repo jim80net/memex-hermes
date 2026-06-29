@@ -11,7 +11,7 @@ import { DEFAULT_CONFIG } from "../../src/core/config.ts";
 import { isSessionProjectId, resolveHermesProjectId } from "../../src/core/sync-helpers.ts";
 import { handleToolRemember } from "../../src/hooks/tool-remember.ts";
 import { captureInit, resetState } from "../../src/state.ts";
-import { makeFakePaths, makeTmpRoot } from "./_helpers.ts";
+import { makeFakePaths, makeTmpRoot, setupBareRemoteAndClone } from "./_helpers.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -91,13 +91,12 @@ describe("memex_remember promotion / suppression (D7)", () => {
       sessionId: "sess-xyz",
       hermesHome: paths.hermesHome,
     });
+    // synced now means "committed AND pushed", so this needs a real remote.
+    const { syncRepoDir, remoteDir } = await setupBareRemoteAndClone(root);
+    paths.syncRepoDir = syncRepoDir;
     const config: HermesConfig = {
       ...DEFAULT_CONFIG,
-      sync: {
-        ...DEFAULT_CONFIG.sync,
-        enabled: true,
-        repo: "git@example.com:foo/bar.git",
-      },
+      sync: { ...DEFAULT_CONFIG.sync, enabled: true, repo: remoteDir },
     };
     const out = await handleToolRemember(
       { content: "X", scope: "project", projectName: "named-proj" },
@@ -107,6 +106,7 @@ describe("memex_remember promotion / suppression (D7)", () => {
     );
     expect(out.written).toContain("named-proj");
     expect(out.written).not.toContain("_session");
+    expect(out.committed).toBe(true);
     expect(out.synced).toBe(true);
   });
 
