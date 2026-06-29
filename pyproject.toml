@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memex-hermes"
-version = "0.1.0"
+version = "0.1.1"
 description = "Memex skill/memory/rule router for Hermes Agent — semantic context injection via MemoryProvider, sharing the @jim80net/memex-core engine library with memex-claude and memex-openclaw (each adapter ships its own bun-compiled binary)"
 readme = "README.md"
 license = { text = "MIT" }
