@@ -17,9 +17,13 @@ See `design/memex-remember-commit-push.md`.
   `commitAndMaybePush` helper in `src/core/sync-helpers.ts` (`initSyncRepo` →
   `git add` → `git commit` → `pushWithRetry` gated on `autoCommitPush` &&
   `!isSessionProjectId`); refactor `session-end` to use it.
-- Wire `handleToolRemember` through the helper after writing the file; set
-  `synced = pushed` (committed **and** pushed this call), and update the tool
-  schema description + docstring so `synced` no longer over-claims.
+- Wire `handleToolRemember` through the helper after writing the file (committing
+  only the single written file, via its repo-relative path); return
+  `{written, committed, synced}` where `synced = pushed` (committed **and** pushed
+  this call) and `committed` distinguishes a transient miss (committed locally,
+  rides the next push) from a terminal one. Update the **agent-facing Python
+  schema description** (`memex_hermes/tools.py`) + the TS header docstring so
+  `synced` no longer over-claims.
 - Reconcile the contract tests that pinned `synced` as eligibility against a fake
   remote: move the `synced=true` cases to a real bare remote
   (`setupBareRemoteAndClone`, `repo = remoteDir`), add a bare-remote round-trip
@@ -41,5 +45,10 @@ See `design/memex-remember-commit-push.md`.
   locally first; push is gated + rebase-retry + never force/reset.
 - `session-end` is refactored to the shared helper (its existing push tests are
   the regression gate; no behavior change intended).
-- No `@jim80net/memex-core` change; no Python change (the provider forwards the
-  envelope verbatim).
+- Adds `committed` to the `memex_remember` return (additive — existing readers of
+  `written`/`synced` keep working).
+- Python: the **agent-facing tool-schema description** (`tools.py`) is updated to
+  the new `synced`/`committed` semantics; the provider still forwards the binary
+  envelope verbatim. No `@jim80net/memex-core` change.
+- Discovered tech debt filed (out of scope): #15 (git-tree concurrency
+  serialization), #16 (content-idempotent filenames).

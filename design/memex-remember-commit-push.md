@@ -1,7 +1,7 @@
 # Design — Wire `memex_remember` commit/push; make `synced` a confirmation (issue #6)
 
-**Status:** proposed
-**Issue:** [#6](https://github.com/jim80net/memex-hermes/issues/6) — `memex_remember` writes the entry but never commits/pushes it (`synced` is a prediction)
+**Status:** proposed (rev 2 — folds in the design-gate review trio: systems-review + open-code-review + STORM)
+**Issue:** [#6](https://github.com/jim80net/memex-hermes/issues/6)
 **Author:** memex flotilla XO · **Date:** 2026-06-29
 
 ## 1. Problem
@@ -9,36 +9,28 @@
 `handleToolRemember` (`src/hooks/tool-remember.ts`) writes the memory file into
 the sync-repo working tree but performs **no `git add/commit/push`**. The
 `Hermes.sync-turn` mtime-watcher only tracks `MEMORY.md`/`USER.md`, so
-`memex-remember-*.md` files are committed by **no path** and never reach the
-remote. The returned `synced` field is computed as
+`memex-remember-*.md` is committed by **no path** and never reaches the remote.
+The returned `synced` field is computed as
 `sync.enabled && repo && !isSessionProjectId(projectId)` — an **eligibility
-prediction**, not a confirmation that the entry propagated.
+prediction**, not a confirmation. The agent-facing tool-schema description
+(`memex_hermes/tools.py:104-108`) likewise advertises `synced` as "eligible to
+sync."
 
 **Impact:** an explicit `memex_remember` persists locally (usable for same-host
-index recall) but does **not** propagate cross-adapter — which is the tool's
-headline purpose, and the foundation for the operator's cross-harness
-memory-portability direction. No data loss; silent non-propagation. This is the
-same bug class P2-3 already fixed for `session-end` learnings (which now commits
-+ pushes).
-
-This is the load-bearing prerequisite for cross-harness portability: a memory a
-desk records under one harness must actually reach the shared repo to be
-readable under another.
+index recall) but does **not** propagate cross-adapter — the tool's headline
+purpose and the foundation for the operator's cross-harness memory-portability
+direction. No data loss; silent non-propagation. Same bug class P2-3 already
+fixed for `session-end` learnings.
 
 ## 2. Approach
 
-Route `memex_remember` through the **same commit + gated-push path session-end
-now uses**, and make `synced` reflect the **actual outcome**.
+Route `memex_remember` through the **same commit + gated-push policy
+`session-end` uses**, extracted into a shared helper, and report the **actual
+outcome** with a small tri-state return.
 
-### 2.1 Extract the shared commit+push policy (`sync-helpers.ts`)
-
-Three writers now need "commit a written file into the sync repo, then push if
-eligible": `session-end` (inline today), `memex_remember` (this change), and —
-structurally — `_mirror` (kept as-is; it carries the `MEMORY.md`/`USER.md`
-target-mapping flavor and is out of scope). Give the shared policy one home:
+### 2.1 Shared commit+push policy (`sync-helpers.ts`)
 
 ```ts
-// sync-helpers.ts
 export interface CommitAndPushResult { committed: boolean; pushed: boolean; }
 
 export async function commitAndMaybePush(args: {
@@ -51,82 +43,138 @@ export async function commitAndMaybePush(args: {
 }): Promise<CommitAndPushResult>;
 ```
 
-Behavior (exactly session-end's policy, generalized):
-1. If `!sync.enabled || !sync.repo` → `{committed:false, pushed:false}` (write-only; no commit).
+Policy (exactly `session-end`'s, generalized — `session-end.ts:95-132`):
+1. If `!sync.enabled || !sync.repo` → `{committed:false, pushed:false}` (write-only).
 2. `initSyncRepo(sync, syncRepoDir)` → `git add <addPaths>` → `git commit -m message`.
-   A benign "nothing to commit" → `{committed:false, pushed:false}` (no throw).
-3. Push **only** when `committed && sync.autoCommitPush && !isSessionProjectId(projectId)`
-   — `pushWithRetry` (rebase-retry, no force, no reset) on the detected branch.
-   `pushed = result.pushed`. (`projectId === null` is treated as non-session.)
+   - On commit error: if the message matches `nothing to commit` → return
+     `{committed:false, pushed:false}` **silently** (benign); **otherwise log a
+     warning** and return `{committed:false}` — preserving `session-end`'s
+     genuine-failure visibility (it does NOT silently swallow real commit
+     failures today, so the extraction must not downgrade that).
+3. Push **only** when `committed && sync.autoCommitPush && isPushEligible(projectId)`,
+   where `isPushEligible(id) = id === null || !isSessionProjectId(id)`. (`isSessionProjectId`
+   takes a string and would throw on `null`, so the `null`/global case is guarded
+   first.) `pushWithRetry` (rebase-retry, no force, no reset) on `detectBranch`.
+   `pushed = result.pushed`.
 
-Refactor `session-end.ts` to call it (de-dups its inline block; gated by its
-existing push tests as the regression net).
+`initSyncRepo` clones-or-inits and fixes the `origin` URL; it does **not** pull
+(`syncPull` is separate). A per-write push therefore relies on `pushWithRetry`'s
+`git pull --rebase` to recover from a non-fast-forward under a busy remote.
+
+Refactor `session-end.ts` to call it (`addPaths = [projects/<id>/memory]` — keeps
+its directory-scoped commit; gated by its existing bare-remote push tests at
+`session-end.test.ts:134-168` as the regression net).
 
 ### 2.2 Wire `handleToolRemember`
 
-After writing the file (unchanged path/format logic), compute the repo-relative
-path of the written file and call `commitAndMaybePush`. Set
-**`synced = result.pushed`** — i.e. `synced` is true **iff the entry was
-committed AND pushed to the remote on this call**. Update the tool-schema
-description + docstring so `synced` means "committed and pushed to the shared
-remote," not an eligibility guess.
+After writing the file (unchanged path/format logic), compute the file's
+**repo-relative** path (`relative(syncRepoDir, filePath)` — the current `filePath`
+is absolute) and pass it as the single `addPaths` entry — so tool-remember commits
+**only its own file**, never sweeping a concurrently-written sibling. Call
+`commitAndMaybePush`; return `{written, committed, synced}` where
+`committed = result.committed` and `synced = result.pushed`.
 
-`projectId` for the gate: `global` scope → `null` (push-eligible); `session`
-scope / session-fallback → `_session/*` (push suppressed); `project`/named →
-the resolved id.
+Update the **Python** schema description (`tools.py:104-108`) and the TS file
+header (`tool-remember.ts:2-9`, which still says "ELIGIBILITY prediction") so the
+agent-facing contract reads: `synced` = committed **and** pushed to the remote
+this call; `committed` = committed to the local sync repo (propagates on the next
+push if not yet `synced`). (This **is** a Python change — the proposal/impact are
+corrected accordingly; the binary envelope is unchanged.)
 
-### 2.3 `synced` semantics (the honest contract)
+`projectId` for the gate (all four real shapes):
+- `global` scope → `null` → push-eligible.
+- `session` scope / no-cwd fallback → `_session/<id>` → push **suppressed** (D7/C12).
+- `project` scope, git cwd → `<host>/<owner>/<repo>` → push-eligible.
+- `project` scope, **non-git cwd** → `_local/<encoded-cwd>` → push-eligible
+  (consistent with `_mirror.ts:108` and `session-end.ts:119`, which already push
+  `_local/` ids; `isSessionProjectId("_local/…") === false`). Pinned by a test.
 
-`synced === true` ⟺ `enabled && repo && !session && autoCommitPush && push succeeded`.
-`synced === false` in every other case, each honest:
-- sync disabled / no repo → not committed.
-- session scope or `_session/*` fallback → committed locally, push **suppressed** (D7/C12).
-- `autoCommitPush:false` → committed locally, not auto-pushed.
-- push failed (remote down) → committed locally (retained for a later push), not pushed **this call**.
+### 2.3 The return contract (tri-state, the issue's "split eligibility vs confirmed")
 
-The return shape stays `{written, synced}` — no new field; `synced` simply stops
-over-claiming. (The previously-returned eligibility is dropped because it misled.)
+`{written, committed, synced}` — `written` unchanged (absolute path); two honest
+booleans that let the agent distinguish a **transient** miss from a **terminal**
+one (the bug the old single `synced` bool hid):
+
+| `committed` | `synced` | meaning | agent action |
+|---|---|---|---|
+| true | true | committed AND pushed to remote this call | done |
+| true | false | committed locally; push suppressed/off/failed — **rides the next successful push from any writer** | nothing — do NOT re-call |
+| false | false | not committed (sync disabled / no repo) — only in the working tree | nothing |
+
+This adds one additive field (non-breaking — existing readers of `written`/`synced`
+keep working) and directly mitigates the duplication amplifier (#16): an agent
+told `committed:true, synced:false` knows the entry is coming and won't re-call
+`memex_remember` (which, with random-suffix filenames, would write a duplicate).
+
+`synced === true` ⟺ `enabled && repo && push-eligible && autoCommitPush && push succeeded`.
+
+**Recovery (precise):** a committed-but-unpushed entry is **not** re-pushed by any
+dedicated timer. `pushWithRetry` runs `git push origin <branch>`, which pushes
+**all** ahead commits — so the stranded commit propagates on the **next successful
+push by any writer** (`session-end`, the mtime-mirror, or a later `memex_remember`).
+Verified by a dedicated test (push-failure → later success → entry on remote).
 
 ## 3. Test reconciliation
 
-The existing contract tests pin `synced` as **eligibility** using a **fake,
+The existing contract tests pin `synced` as eligibility using a **fake,
 unreachable** remote (`repo:"git@example.com:foo/bar.git"`) and assert
-`synced=true` with no git op. Under the new semantics those become `synced=false`
-(push to a fake URL fails). Reconcile:
+`synced=true` with no git op. Under the new semantics those flip to `synced=false`.
 
 - **`synced=false` cases stay** (sync-disabled, session scope, `_session/*`
-  regardless of `autoCommitPush`) — still false, now for the right reason.
-- **`synced=true` cases move to a real bare remote** via `setupBareRemoteAndClone`
-  (`repo = remoteDir`, `autoCommitPush:true`). NOTE: `initSyncRepo` rewrites
-  `origin` to `config.repo` (memex-core `sync.ts:78`), so the test MUST set
-  `config.sync.repo = remoteDir` (the bare-remote path), not a fake URL.
-- **New round-trip test:** `memex_remember` → commit → push → clone the bare
-  remote into a second dir → assert the `memex-remember-*.md` file is present
-  with the payload. This positively proves cross-adapter propagation — the gap
-  #4's e2e round-trip is gated/skipped on.
-- **New negative tests:** `autoCommitPush:false` → committed locally,
-  `synced:false`, file NOT on the remote; push-failure (bad/unreachable remote)
-  → `synced:false`, file retained in the local working tree.
+  regardless of `autoCommitPush`) — now false for the right reason; assert no push.
+- **All three `synced=true` cases move to a real bare remote** via
+  `setupBareRemoteAndClone` (`config.sync.repo = remoteDir` — `initSyncRepo`
+  rewrites `origin` to `config.repo`, so it MUST equal the bare-remote path;
+  `autoCommitPush:true`):
+  - `tool-dispatch.test.ts:123-138` (basic eligible),
+  - `tool-dispatch.test.ts:165-184` (**explicit `projectName` promotion**),
+  - `session-suppression.test.ts:88-110` (`projectName` bypass).
+- **New round-trip test:** `memex_remember` → clone the bare remote into a second
+  dir → assert the `memex-remember-*.md` file is present with the payload (the
+  cross-adapter propagation #4's e2e is gated/skipped on).
+- **New `_local/` test:** project scope + non-git cwd → `synced=true`, file on remote.
+- **New negatives:** `autoCommitPush:false` → `committed:true, synced:false`, file
+  NOT on remote; push-failure (`pushRetries:1` + an unreachable/bad remote so the
+  backoff is bounded and the test is fast/deterministic) → `committed:true,
+  synced:false`, file retained locally; then a later successful push → file reaches
+  the remote (the recovery property).
+- **Helper unit tests:** commit+push to a bare remote; session-id suppresses push;
+  `null`/global is push-eligible; `autoCommitPush:false` → committed-not-pushed;
+  disabled/no-repo → no commit; nothing-to-commit silent; a **genuine** commit
+  failure still logs a warning.
+- **Python:** assert `_remember_schema()["description"]` no longer contains
+  "eligible" (doc-drift regression guard).
 
 ## 4. Spec delta
 
 MODIFY `memex-tool-surface` → "memex_remember writes a memory or rule entry and
-reports sync state": redefine `synced` as **committed-and-pushed confirmation**
-(true only when `sync.enabled` AND a repo is configured AND the project id is not
-`_session/*` AND `autoCommitPush` AND the push succeeds); the handler SHALL
-commit the entry and attempt a gated push (not merely write it). Scenarios:
-remote round-trip (synced=true, file on remote), session suppression
-(synced=false, no push), autoCommitPush-off (committed, synced=false).
+reports sync state": the handler SHALL commit + attempt a gated push (not merely
+write); the return is `{"written", "committed", "synced"}`; `synced` is a
+committed-and-pushed confirmation (the precise conjunction above). Scenarios:
+eligible round-trip (synced=true, file on remote), `autoCommitPush=false`
+(committed=true, synced=false, not on remote), session scope (synced=false, no
+push), and session-fallback with `autoCommitPush=true` (still synced=false — the
+D7/C12 invariant).
 
-## 5. Out of scope
-- `_mirror.ts` refactor (different target-mapping flavor; higher blast radius).
-- The spec's `type:"memory"|"rule"` arg for `memex_remember` (the handler only
-  writes `type: memory`; a pre-existing spec/code drift — file separately, do
-  not bundle).
-- `#3` prefetch-latency, `#5` double-mirror, `#8` symlink residual (separate lanes).
+## 5. Out of scope (filed where it's real tech debt)
+- **Git-tree concurrency serialization** (`_mirror` + `session-end` + the new path
+  share one tree with no lock) → **#15**. git's `index.lock` prevents corruption;
+  the worst case is a false-negative `synced` + a retained-then-piggybacked entry.
+- **Content-idempotent `memex_remember` filenames** (random-suffix → duplicates on
+  re-record) → **#16**. The new `committed` field mitigates the *retry* driver.
+- **Fold `_mirror.ts` into the shared `commitAndMaybePush`** — `mirrorAndCommit`
+  is structurally the same primitive (different commit-message + target→filename
+  flavor). Deferred (blast radius); noted on #15 as the natural pairing.
+- **Per-write vs batch push granularity** — cross-harness reads happen at the peer
+  harness's session-start pull, so per-write push buys little latency at some
+  contention cost; the issue directs per-write (matching `_mirror`), and
+  `pushWithRetry`'s rebase bounds the contention. Per-write stands for #6.
+- The spec's `type:"memory"|"rule"` and the `scope` enum drift vs the handler —
+  pre-existing; file separately, do not bundle.
 
 ## 6. Verification
-- `pnpm test` (vitest) green incl. new round-trip + negative tests; `pnpm typecheck` + `pnpm lint` clean.
-- `pytest test/python` unchanged green (the Python provider just forwards the envelope).
-- session-end's existing push tests stay green (regression gate for the extraction).
+- `pnpm test` (vitest) green incl. round-trip + `_local` + negatives + helper units;
+  `pnpm typecheck` + `pnpm lint` clean.
+- `pytest test/python` green incl. the schema-description assertion.
+- `session-end`'s existing bare-remote push tests stay green (extraction regression gate).
 - `openspec validate wire-memex-remember-commit-push --strict` clean.
