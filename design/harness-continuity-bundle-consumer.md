@@ -38,20 +38,24 @@ context into the new harness.
 
 ## 2. Authoritative contract (read from flotilla, not assumed)
 
-flotilla's own `docs/harness-subscription-switching.md` §3.2 defines the bundle
-(verified this session). The load-bearing fields for memex:
+flotilla's own `docs/harness-subscription-switching.md` **§3.3 (resolution) +
+§3.4 (schema)** define the bundle (re-synced to the canonical write-side
+2026-06-29; supersedes the earlier §3.2 draft this doc first cited). The
+load-bearing fields for memex:
 
 ```jsonc
+// <project_root>/.flotilla/switch/<flotilla_agent>/continuity-<switch_token>.json
 {
   "bundle_version": 1,
-  "agent": "research",
+  "flotilla_agent": "grok-research",   // REQUIRED — desk binding (namespaced; not "agent")
   "project_root": "/home/operator/work/project",
   "from": { "surface": "claude-code", ... },
   "to":   { "surface": "grok", ... },
   "switch_token": "20260629T031400.000000001-a3f91b2c",
   "handoff_path": "/.../.flotilla/handoffs/switch-….md",   // the portable chapter snapshot
-  "workspace_state_path": "/home/jim/.flotilla/research/state.md",
-  "memex_injection_hint": "takeover-cross-harness"          // ← today a BARE STRING
+  "workspace_state_path": "/home/jim/.flotilla/grok-research/state.md",
+  "hint_version": 1,                    // TOP-LEVEL (read before parsing the hint)
+  "memex_injection_hint": "takeover-cross-harness"          // bare STRING (or optional {mode,queries[],pin_entries[]})
 }
 ```
 
@@ -68,15 +72,29 @@ Two facts this resolves, and one it leaves open:
   guesses the per-harness convention. Good.
 - **RESOLVED — ownership split is exactly as proposed.** flotilla passes the hint
   + paths; memex does retrieval + injection via the harness's native channel
-  (for memex-hermes: the `Hermes.system-prompt` block + a prefetch at init). The
+  (for memex-hermes: the `Hermes.prefetch` `additionalContext` — see §4). The
   corpus content stays shared; neither side re-authors the constraints.
-- **OPEN (contract question #1 for grok/flotilla-dev) — where is the BUNDLE
-  itself?** The doc specifies the handoff path and the workspace-state path, but
-  not the bundle's OWN on-disk location. memex needs a deterministic,
-  harness-neutral path to read at init. **Proposal:** write the bundle next to the
-  handoff at `<project_root>/.flotilla/switch/continuity-<switch_token>.json` (the
-  product-owned `.flotilla/` home, harness-agnostic, durability-gated like the
-  handoff). memex reads the newest such bundle at takeover.
+- **RESOLVED (flotilla §3.3/§3.4, verified 2026-06-29) — bundle location +
+  desk-binding.** flotilla writes the bundle **desk-scoped** at
+  `<project_root>/.flotilla/switch/<flotilla_agent>/continuity-<switch_token>.json`
+  (durability-gated like the handoff). memex resolves it without scanning, in
+  this order:
+  1. **`$FLOTILLA_SELF`** (provisioned in the smart-desk launch env per
+     `docs/inter-harness.md:90-91`) → read exactly ONE file at
+     `…/switch/$FLOTILLA_SELF/continuity-<token>.json`.
+  2. **`bundle_path`** recorded in `~/.flotilla/<flotilla_agent>/last-switch.json`
+     → the explicit pointer (robust; no filename-format dependency).
+  3. **Content-match fallback** (adapters without `$FLOTILLA_SELF`): accept a
+     bundle only when `project_root == cwd` AND `to.surface == this adapter`.
+  The **desk-scoped path segment resolves the old desk-binding question (Q1b) by
+  construction** — sibling desks sharing a worktree do not collide. The bundle
+  also carries a required top-level `flotilla_agent` field to validate
+  path↔content binding.
+
+NOTE (field names, per §3.4): the desk identity field is **`flotilla_agent`**
+(namespaced to avoid colliding with a harness's own "agent"); **`hint_version`**
+is a **top-level** sibling of `memex_injection_hint` (so memex reads the version
+BEFORE deciding how to parse the hint, and it survives the bare-string form).
 
 ## 3. The `memex_injection_hint` strawman (the red-line deliverable)
 
@@ -108,13 +126,13 @@ the `project_root` scope.
 
 **Trim per the trio (avoid coupling against zero demand):** ship `mode` +
 optional `queries` + optional `pin_entries` (the two with a real use today —
-"seed the prefetch" and "always surface the standing constraints") + `hint_version`
-(the one cheap insurance field, with an explicit degrade: unknown `hint_version`
-→ treat as bare-string/mode-only, parallel to the `bundle_version` rule). **Defer
-`types`/`scope`** until a concrete steering customer exists — flotilla's write
-side shouldn't have to populate them across four drivers with no demand. flotilla
-may keep emitting the bare string forever; memex coerces `string → {mode}` as the
-first step of consumption.
+"seed the prefetch" and "always surface the standing constraints"). **Defer
+`types`/`scope`** until a concrete steering customer exists. `hint_version` lives
+at the **bundle TOP LEVEL** (sibling of `memex_injection_hint`, per §3.4), read
+BEFORE parsing the hint, with the agreed degrade: unknown `hint_version` →
+mode-only interpretation (parallel to `bundle_version`). flotilla may emit the
+bare string forever; memex coerces `string → {mode}` as the first step of
+consumption.
 
 ## 4. memex consumption algorithm (memex-hermes; analogous per adapter)
 
@@ -136,12 +154,16 @@ a **standing channel** (pinned constraints, surfaced every prompt via the rule
 loop) and a **topical channel** (a one-shot rehydration from the handoff).
 
 **At `Hermes.init` (detect + stage):**
-1. **Locate the bundle.** Read `.flotilla/switch/continuity-*.json` under cwd,
-   selecting by `switch_token` (lexical = chronological — NOT mtime), the newest
-   unconsumed one **whose `agent`/`project_root` binds to THIS desk** (open
-   contract Q — §5). All bundle I/O is wrapped in `try/catch → logger.warn →
-   fall through` (the `init.ts:46-48` discipline); absent / malformed JSON /
-   unsupported `bundle_version` → no staging (never throw).
+1. **Locate the bundle** (desk-scoped resolution, §2 / flotilla §3.3 — no
+   glob/scan): (a) if `$FLOTILLA_SELF` is set, read exactly one file at
+   `<project_root>/.flotilla/switch/$FLOTILLA_SELF/continuity-<token>.json`;
+   else (b) resolve the explicit `bundle_path` from
+   `~/.flotilla/<flotilla_agent>/last-switch.json`; else (c) content-match
+   fallback (`project_root == cwd` AND `to.surface == this adapter`). Validate
+   the bundle's top-level `flotilla_agent` matches the path segment. All bundle
+   I/O is wrapped in `try/catch → logger.warn → fall through` (the
+   `init.ts:46-48` discipline); absent / malformed JSON / unsupported top-level
+   `bundle_version` → no staging (never throw).
 2. **Validate + bound (trust gate).** `handoff_path` / `project_root` MUST stay
    within the project boundary; cap the total injected size; the handoff-derived
    query (step 4) is untrusted text used for retrieval only.
@@ -175,45 +197,42 @@ loop) and a **topical channel** (a one-shot rehydration from the handoff).
 instructions); the RETRIEVAL is shared (the memex-core index). Contract addition:
 an adapter MUST have a model-visible dynamic-injection point to consume the
 bundle; one without falls back to no-op (the bundle is advisory, never required).
+The bundle is JSON and the hint references corpus entries/queries, so every
+adapter resolves them through the same memex-core index → identical retrieval;
+no harness-specific assumption leaks into memex's read path.
 
-**Harness-neutrality.** The bundle is JSON; the hint references corpus
-entries/queries; every adapter resolves them through the same memex-core index →
-identical retrieval. Only the injection CHANNEL differs per adapter (by design,
-contract rule 2). No harness-specific assumption leaks into memex's read path.
-
-## 5. Open contract questions (carry into BOTH trios)
+## 5. Contract questions (status after the cross-desk red-line)
 
 0. **PREREQUISITE — corpus ingest of the standing constraints (#20).** The
-   constraints aren't in the shared corpus yet (§0). This is upstream of the
-   whole contract; flag it as the gating dependency, not a memex-internal detail.
-1. **Bundle location** (§2) — where does flotilla write the bundle itself?
-   Proposal: `<project_root>/.flotilla/switch/continuity-<switch_token>.json`.
-1b. **Bundle ↔ desk binding** — how does the consumer know a bundle is for THIS
-   desk (not a sibling switch in a shared `project_root`)? memex-hermes doesn't
-   obviously know its flotilla `agent` name. Candidate: match `project_root`==cwd
-   AND the `to.surface` equals this adapter; or flotilla writes to a desk-scoped
-   path. Real contract gap — resolve with flotilla-dev/grok.
-2. **Hint richness** (§3) — accept the optional structured form, or keep the bare
-   string for v1 and defer steering? (memex supports both; flotilla chooses how
-   much to emit.)
-3. **Handoff-as-query** — is it acceptable for memex to derive a prefetch query
-   from the handoff markdown when `queries` is absent, or should the hint always
-   carry an explicit query? (Affects how much the operator must steer.)
-4. **Durability/timing** — flotilla-dev confirmed write-then-takeover; memex's
-   fallback covers write-lag + the no-bundle launch. Confirm the bundle is
-   durability-gated like the handoff (contract rule 1 implies yes for the
-   handoff; extend to the bundle).
-5. **Consume-once token store** — memex owns it (cache dir); flotilla need not
-   track memex consumption. Confirm flotilla doesn't expect an ack.
+   constraints aren't in the shared corpus yet (§0). Upstream of the whole
+   contract; the gating dependency. **Still open — operator's call.**
+1. ✅ **RESOLVED (§3.3/§3.4)** — Bundle location + desk-binding. Desk-scoped path
+   `<project_root>/.flotilla/switch/<flotilla_agent>/continuity-<token>.json`,
+   resolved via `$FLOTILLA_SELF` → else `bundle_path` in `last-switch.json` →
+   else content-match (§2). The desk-scoped segment resolves binding by
+   construction; field is `flotilla_agent`.
+2. ✅ **RESOLVED** — Hint richness: flotilla emits the bare string + top-level
+   `hint_version`; memex accepts the optional `{mode,queries[],pin_entries[]}`;
+   `types`/`scope` deferred.
+3. ✅ **RESOLVED (mitigated)** — Handoff-as-query footgun: memex never queries the
+   whole handoff; the no-`queries` default is the `mode`'s built-in query (or a
+   capped salient-line extract), bounded.
+4. ✅ **RESOLVED** — Durability/timing: write-then-takeover confirmed; the bundle
+   is durability-gated like the handoff (§3.4); memex's fallback covers
+   write-lag + the no-bundle launch.
+5. **Consume-once token store** — memex owns it (cache dir, `withFileLock`);
+   flotilla need not track memex consumption. flotilla-dev confirmed no ack
+   expected. (Closeable.)
 
 ## 6. Out of scope
 - The flotilla WRITE side (grok-research's lane; this is the consumption + the
   hint red-line).
 - A new corpus `type` for "constraint" — `type: rule` already carries workflow
-  constraints; no schema change needed (the audit in #18 will confirm the
-  operator's standards are authored as corpus rules, not adapter-local config).
+  constraints; no schema change needed. (The #20 audit confirmed the operator's
+  standards are NOT yet corpus rules — they're adapter-local dotfiles; that
+  ingest is #20's job, not a new type.)
 - The other adapters' injection channels (memex-claude/grok/codex/openclaude
-  implement step 5 in their own repos; this design is the memex-hermes instance +
+  implement the inject step in their own repos; this design is the memex-hermes instance +
   the shared contract).
 
 ## 7. Verification plan (when implementation is unblocked, post-grok-bundle)
