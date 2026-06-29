@@ -11,7 +11,13 @@ import { handleToolRecall } from "../../src/hooks/tool-recall.ts";
 import { handleToolRemember } from "../../src/hooks/tool-remember.ts";
 import { handleToolSearch } from "../../src/hooks/tool-search.ts";
 import { captureInit, resetState } from "../../src/state.ts";
-import { FakeSkillIndex, makeFakePaths, makeSkill, makeTmpRoot } from "./_helpers.ts";
+import {
+  FakeSkillIndex,
+  makeFakePaths,
+  makeSkill,
+  makeTmpRoot,
+  setupBareRemoteAndClone,
+} from "./_helpers.ts";
 
 describe("handleToolSearch", () => {
   it("returns top-K results above threshold, each with name/type/score/location", async () => {
@@ -120,21 +126,21 @@ describe("handleToolRemember", () => {
     expect(body).toContain("remember this body");
   });
 
-  it("reports synced=true when sync.enabled and project id is not _session/*", async () => {
+  it("reports committed+synced=true when sync.enabled and project id is not _session/*", async () => {
     captureInit({
       agentContext: "primary",
       sessionId: "s-sync",
       hermesHome: paths.hermesHome,
     });
+    // synced now means "committed AND pushed", so this needs a real remote.
+    const { syncRepoDir, remoteDir } = await setupBareRemoteAndClone(root);
+    paths.syncRepoDir = syncRepoDir;
     const config: HermesConfig = {
       ...DEFAULT_CONFIG,
-      sync: {
-        ...DEFAULT_CONFIG.sync,
-        enabled: true,
-        repo: "git@example.com:foo/bar.git",
-      },
+      sync: { ...DEFAULT_CONFIG.sync, enabled: true, repo: remoteDir },
     };
-    const out = await handleToolRemember({ content: "x" }, root, config, paths);
+    const out = await handleToolRemember({ content: "x", scope: "global" }, root, config, paths);
+    expect(out.committed).toBe(true);
     expect(out.synced).toBe(true);
   });
 
@@ -168,9 +174,11 @@ describe("handleToolRemember", () => {
       sessionId: "fresh",
       hermesHome: paths.hermesHome,
     });
+    const { syncRepoDir, remoteDir } = await setupBareRemoteAndClone(root);
+    paths.syncRepoDir = syncRepoDir;
     const config: HermesConfig = {
       ...DEFAULT_CONFIG,
-      sync: { ...DEFAULT_CONFIG.sync, enabled: true, repo: "git@e.com:f/b.git" },
+      sync: { ...DEFAULT_CONFIG.sync, enabled: true, repo: remoteDir },
     };
     const out = await handleToolRemember(
       { content: "owned", scope: "project", projectName: "explicit-proj" },

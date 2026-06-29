@@ -103,8 +103,11 @@ def _remember_schema() -> dict[str, Any]:
         "name": "memex_remember",
         "description": (
             "Persist a new memory into the user's memex. Writes a markdown "
-            "file with frontmatter; the `synced` result reports whether the "
-            "entry is eligible to sync to the configured remote."
+            "file with frontmatter, then commits and (when eligible) pushes it "
+            "to the shared remote. The `synced` result is true only if the entry "
+            "was committed AND pushed to the remote on this call; `committed` is "
+            "true if it was committed locally (a committed-but-not-synced entry "
+            "propagates on the next sync, so there is no need to re-call)."
         ),
         "parameters": {
             "type": "object",

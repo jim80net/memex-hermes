@@ -187,3 +187,13 @@ export async function setupBareRemoteAndClone(root: string): Promise<FakeGitSetu
 
   return { syncRepoDir, remoteDir };
 }
+
+/**
+ * Clone a bare remote into a fresh working tree so a test can inspect what
+ * actually reached the remote (the cross-adapter "another adapter pulls it"
+ * view). Returns the clone dir.
+ */
+export async function cloneRemote(remoteDir: string, destDir: string): Promise<string> {
+  await execFileAsync("git", ["clone", "-q", remoteDir, destDir]);
+  return destDir;
+}

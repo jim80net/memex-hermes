@@ -55,6 +55,20 @@ def test_remember_schema_has_content_required() -> None:
     assert "content" in remember["parameters"]["required"]
 
 
+def test_remember_schema_description_reflects_commit_push_semantics() -> None:
+    """`synced` is a committed-AND-pushed confirmation (#6), not an eligibility
+    prediction — the agent-facing description must not over-claim."""
+    schemas = all_tool_schemas()
+    remember = next(s for s in schemas if s["name"] == "memex_remember")
+    desc = remember["description"].lower()
+    # The old over-claim was "eligible to sync to the configured remote"; the new
+    # wording may still say "when eligible" to describe push gating — ban only the
+    # over-claim phrase, and require the confirmation wording.
+    assert "eligible to sync" not in desc, "`synced` must not be an eligibility prediction"
+    assert "pushed" in desc, "description must say `synced` means committed AND pushed"
+    assert "committed" in desc, "description must mention the `committed` field"
+
+
 def test_remember_schema_matches_binary_contract() -> None:
     """The memex_remember params must match HermesToolRememberArgs:
     content / scope / projectName — never the dead `type` param."""

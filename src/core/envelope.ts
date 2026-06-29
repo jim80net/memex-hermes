@@ -198,7 +198,15 @@ export interface HermesToolSearchOutput {
 }
 
 export interface HermesToolRememberOutput {
+  /** Absolute path of the written memory file. */
   written: string;
+  /**
+   * The entry was committed to the local sync repo. A `committed:true,
+   * synced:false` result means it is committed locally and will propagate on the
+   * next successful push by any writer — the agent should NOT re-call.
+   */
+  committed: boolean;
+  /** The entry was committed AND pushed to the remote on this call. */
   synced: boolean;
 }
 
