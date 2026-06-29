@@ -53,7 +53,7 @@ load-bearing fields for memex:
   "to":   { "surface": "grok", ... },
   "switch_token": "20260629T031400.000000001-a3f91b2c",
   "handoff_path": "/.../.flotilla/handoffs/switch-….md",   // the portable chapter snapshot
-  "workspace_state_path": "/home/jim/.flotilla/grok-research/state.md",
+  "workspace_state_path": "/home/operator/.flotilla/grok-research/state.md",
   "hint_version": 1,                    // TOP-LEVEL (read before parsing the hint)
   "memex_injection_hint": "takeover-cross-harness"          // bare STRING (or optional {mode,queries[],pin_entries[]})
 }
