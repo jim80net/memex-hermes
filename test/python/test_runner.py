@@ -49,7 +49,7 @@ def test_await_subprocess_writes_correct_envelope_shape(tmp_path: Path) -> None:
         HERMES_HEALTH,
         {"probe": "ok"},
         session_id="sess-A",
-        cwd="/home/jim/proj",
+        cwd="/home/operator/proj",
     )
     assert result == {"ready": True}
 
@@ -60,7 +60,7 @@ def test_await_subprocess_writes_correct_envelope_shape(tmp_path: Path) -> None:
     assert envelope["hook_event_name"] == "Hermes.health"
     assert envelope["args"] == {"probe": "ok"}
     assert envelope["session_id"] == "sess-A"
-    assert envelope["cwd"] == "/home/jim/proj"
+    assert envelope["cwd"] == "/home/operator/proj"
 
 
 def test_memex_hermes_home_is_set_on_subprocess_env(tmp_path: Path) -> None:

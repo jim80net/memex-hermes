@@ -48,7 +48,7 @@ Add `MEMEX_E2E_COLD=1` to additionally exercise `test_first_run.py`. That test c
 | `cold-cache scenario disabled (set MEMEX_E2E_COLD=1 to enable)` | Add `MEMEX_E2E_COLD=1` to additionally enable `test_first_run.py` |
 | `memex binary not found at ... — build it via 'pnpm build' ...` | Build the binary and put it where the fixture expects |
 | `MEMEX_HERMES_BINARY=... does not exist` | Fix the override or unset the env var |
-| `Hermes venv python not found at /home/jim/.hermes/...` | Only the `hermes_session` fixture needs this; install Hermes locally or skip that test |
+| `Hermes venv python not found at ~/.hermes/... (or $HERMES_VENV_PYTHON)` | Only the `hermes_session` fixture needs this; install Hermes locally or skip that test |
 
 ## Cross-adapter byte-compat (issue #4)
 

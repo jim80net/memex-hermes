@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-25
 **Branch:** `main`
-**Working directory:** `/home/jim/workspace/github.com/jim80net/memex-hermes`
+**Working directory:** `/home/operator/workspace/github.com/jim80net/memex-hermes`
 **Repo state:** clean working tree, 4 commits, **no remote configured yet**
 **OpenSpec progress:** 9 / 90 tasks complete; paused at the verification spike
 
@@ -20,13 +20,13 @@ The chosen architecture (locked in this session, codified as openspec change `bo
 
 This session got us from empty directory → fully-specced + scaffolded repo + spike trace provider. **The next milestone is running the spike against a live Hermes session** to verify three contract assumptions before writing real implementation code (`on_memory_write` firing semantics, `initialize`/`save_config` kwarg shapes, tool-schema dict shape).
 
-This dev box (`/home/jim/workspace/github.com/jim80net/memex-hermes` on Linux WSL2) does not have Hermes Agent installed. The next session needs to be on a host that does.
+This dev box (`/home/operator/workspace/github.com/jim80net/memex-hermes` on Linux WSL2) does not have Hermes Agent installed. The next session needs to be on a host that does.
 
 ---
 
 ## Session Summary
 
-Started from `/home/jim/workspace/github.com/jim80net/memex-hermes/` which was completely empty. Walked the standard development flow:
+Started from `/home/operator/workspace/github.com/jim80net/memex-hermes/` which was completely empty. Walked the standard development flow:
 
 1. Brainstormed the adapter shape (C1/C2 contract choice, E1/E2/E3 engine choice) → user picked **C2 + E1**.
 2. Read Hermes docs (memory-providers, plugins, build-a-hermes-plugin, hooks, skills, memory, llms.txt index, prompt-assembly, developer-guide/memory-provider-plugin) to recover the actual MemoryProvider contract.
@@ -137,9 +137,9 @@ Hermes plugin contract | Python `register(ctx)` in `__init__.py`; plugin.yaml ma
 MemoryProvider ABC surface | 15 methods: `name`, `is_available`, `initialize(session_id, **kwargs)`, `get_tool_schemas`, `handle_tool_call(name, args)`, `get_config_schema`, `save_config(values, hermes_home)`, `system_prompt_block`, `prefetch(query)`, `queue_prefetch(query)`, `sync_turn(user, assistant)`, `on_session_end(messages)`, `on_pre_compress(messages)`, `on_memory_write(action, target, content)`, `shutdown` | webfetch of `/docs/developer-guide/memory-provider-plugin`
 Hermes built-in memory | `$HERMES_HOME/memories/{MEMORY.md,USER.md}` — frozen-snapshotted into Layer 5/6 of cached system prompt at session start | webfetch of `/docs/user-guide/features/memory` + `/docs/developer-guide/prompt-assembly`
 Hermes skills | `$HERMES_HOME/skills/<name>/SKILL.md`; YAML frontmatter; progressive disclosure via `skills_list()` / `skill_view(name)`; `external_dirs` in `$HERMES_HOME/config.yaml` | webfetch of `/docs/user-guide/features/skills`
-memex-core HookInput shape | `{ hook_event_name: string; session_id?: string; transcript_path?: string; cwd?: string; prompt?: string; tool_name?: string; tool_input?: Record<string,unknown> }` | `/home/jim/workspace/github.com/jim80net/memex-core/src/types.ts:94-102`
-memex-core file-lock | `mkdir`-based atomic lock with 5 s timeout, 30 s stale recovery. Used for cache/telemetry/session writes | `/home/jim/workspace/github.com/jim80net/memex-core/src/file-lock.ts`
-Sibling adapter patterns | memex-claude = standalone binary + JSON-stdin hooks; memex-openclaw = in-process TS plugin with `api.on('before_prompt_build', ...)` | `/home/jim/workspace/github.com/jim80net/memex-claude/src/`, `/home/jim/workspace/github.com/jim80net/memex-openclaw/src/`
+memex-core HookInput shape | `{ hook_event_name: string; session_id?: string; transcript_path?: string; cwd?: string; prompt?: string; tool_name?: string; tool_input?: Record<string,unknown> }` | `/home/operator/workspace/github.com/jim80net/memex-core/src/types.ts:94-102`
+memex-core file-lock | `mkdir`-based atomic lock with 5 s timeout, 30 s stale recovery. Used for cache/telemetry/session writes | `/home/operator/workspace/github.com/jim80net/memex-core/src/file-lock.ts`
+Sibling adapter patterns | memex-claude = standalone binary + JSON-stdin hooks; memex-openclaw = in-process TS plugin with `api.on('before_prompt_build', ...)` | `/home/operator/workspace/github.com/jim80net/memex-claude/src/`, `/home/operator/workspace/github.com/jim80net/memex-openclaw/src/`
 
 ---
 
@@ -250,7 +250,7 @@ This also unblocks the cross-platform-sync goal long term and gives you a place 
 ```bash
 # On THIS machine:
 rsync -avz --exclude='.git/objects/pack' --exclude='node_modules' --exclude='__pycache__' \
-  /home/jim/workspace/github.com/jim80net/memex-hermes/ \
+  /home/operator/workspace/github.com/jim80net/memex-hermes/ \
   <hermes-host>:~/workspace/github.com/jim80net/memex-hermes/
 
 # Then on the Hermes host, verify:
@@ -324,7 +324,7 @@ Then mark §2.2–§2.7 done in `openspec/changes/bootstrap-memex-hermes-adapter
 
 **Blocked by:** §2 complete (`spike/SPIKE-COMPLETE.md` exists).
 **Files to create:** `src/core/hermes-paths.ts`, `src/core/config.ts`, `src/core/session.ts`, plus a YAML parsing helper.
-**Reference implementations:** `/home/jim/workspace/github.com/jim80net/memex-claude/src/core/{paths.ts, config.ts, session.ts}` — port these and adapt for Hermes' path layout.
+**Reference implementations:** `/home/operator/workspace/github.com/jim80net/memex-claude/src/core/{paths.ts, config.ts, session.ts}` — port these and adapt for Hermes' path layout.
 **Spec contract:** `openspec/changes/bootstrap-memex-hermes-adapter/specs/hermes-path-resolution/spec.md`.
 
 ---
@@ -333,7 +333,7 @@ Then mark §2.2–§2.7 done in `openspec/changes/bootstrap-memex-hermes-adapter
 
 **Blocked by:** §2.
 **Files to create:** `src/main.ts` (entry; extends `hook_event_name` switch), `src/hooks/{prefetch, sync-turn, session-end, pre-compress, memory-write, system-prompt, tool}.ts`, plus push-retry and `_session/*` suppression wiring.
-**Reference:** `/home/jim/workspace/github.com/jim80net/memex-claude/src/hooks/` for hook patterns.
+**Reference:** `/home/operator/workspace/github.com/jim80net/memex-claude/src/hooks/` for hook patterns.
 **Spec contract:** `openspec/changes/bootstrap-memex-hermes-adapter/specs/hermes-engine-events/spec.md` + `hermes-sync-bridge/spec.md`.
 **Gotchas:**
 - §4.4 — `extractionModel` MUST be explicitly configured in v1 (G17 amendment); no auto-discover-Hermes-active-model.
@@ -418,7 +418,7 @@ Then mark §2.2–§2.7 done in `openspec/changes/bootstrap-memex-hermes-adapter
 
 - **No git remote yet.** This repo's 4 commits exist only on this dev box. **First task on the Hermes host is choosing migration mechanism (gh repo create vs rsync).** See Remaining Work item 0.
 - **GitHub repo `jim80net/memex-hermes` does NOT exist.** Verified via `gh repo view jim80net/memex-hermes` → "Could not resolve to a Repository." Either create it with `gh repo create --private` or sync via filesystem.
-- **`openspec` CLI version 1.3.1** is installed at `/home/jim/.nvm/versions/node/v24.15.0/bin/openspec`. If the Hermes host has a different version, validate `openspec validate "bootstrap-memex-hermes-adapter"` still passes after migration.
+- **`openspec` CLI version 1.3.1** is installed at `/home/operator/.nvm/versions/node/v24.15.0/bin/openspec`. If the Hermes host has a different version, validate `openspec validate "bootstrap-memex-hermes-adapter"` still passes after migration.
 - **opsx scaffolding lives in `.claude/` and `.opencode/`.** These were auto-created by `openspec new change` during this session. They are committed and should travel with the repo.
 - **Hermes `HERMES_HOME` default is `~/.hermes/`** per docs. The spike uses `/tmp/hermes-spike` to avoid polluting the user's real install — do NOT run the spike against the user's real `~/.hermes/` directly.
 - **The trace provider's import `from agent.memory_provider import MemoryProvider`** assumes the module path Hermes documents. If a real install puts the ABC at a different path (e.g., `hermes_agent.memory_provider`), update `spike/trace_provider.py` line 47 in place and add a note to `spike/SPIKE-COMPLETE.md` under "contract divergences."
@@ -476,6 +476,6 @@ Then mark §2.2–§2.7 done in `openspec/changes/bootstrap-memex-hermes-adapter
 | `spike/trace_provider.py` | — | The verification spike itself (§2.1 deliverable) |
 
 **Sibling repo references** (read-only, for porting patterns):
-- `/home/jim/workspace/github.com/jim80net/memex-claude/` — Node.js + bun-compiled binary; JSON-stdin hook pattern
-- `/home/jim/workspace/github.com/jim80net/memex-openclaw/` — in-process TS plugin; `api.on('before_prompt_build', ...)` pattern
-- `/home/jim/workspace/github.com/jim80net/memex-core/` — the shared engine; `src/types.ts:94` defines `HookInput`; `src/file-lock.ts` defines `withFileLock`
+- `/home/operator/workspace/github.com/jim80net/memex-claude/` — Node.js + bun-compiled binary; JSON-stdin hook pattern
+- `/home/operator/workspace/github.com/jim80net/memex-openclaw/` — in-process TS plugin; `api.on('before_prompt_build', ...)` pattern
+- `/home/operator/workspace/github.com/jim80net/memex-core/` — the shared engine; `src/types.ts:94` defines `HookInput`; `src/file-lock.ts` defines `withFileLock`

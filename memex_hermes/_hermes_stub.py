@@ -8,7 +8,7 @@ want the package to import cleanly, the test suite to run, and
 
 This file mirrors the public surface of the real ABC **exactly** as
 verified for Hermes Agent v0.14.0 (``spike/SPIKE-COMPLETE.md`` and the
-on-disk source at ``/home/jim/.hermes/hermes-agent/agent/memory_provider.py``).
+on-disk source at the Hermes install's ``agent/memory_provider.py``).
 Signatures are copied verbatim — keyword-only ``session_id``, the
 ``metadata`` arg on ``on_memory_write``, the ``str`` return on
 ``on_pre_compress``, the ``list[dict[str, Any]]`` return on

@@ -3,8 +3,8 @@
 **Date:** 2026-05-26
 **Hermes Agent version:** v0.14.0 (2026.5.16), Python 3.11.15
 **Method:** Source grounding (primary) + runtime confirmation (optional, see §C)
-**Source tree:** `/home/jim/.hermes/hermes-agent/` (editable install; `agent` package on the
-venv import path `/home/jim/.hermes/hermes-agent/venv/bin/python`)
+**Source tree:** `~/.hermes/hermes-agent/` (editable install; `agent` package on the
+venv import path `~/.hermes/hermes-agent/venv/bin/python`)
 
 ---
 
