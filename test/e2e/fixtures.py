@@ -35,8 +35,14 @@ from typing import Any, Final
 import pytest
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent.parent
+# The Hermes venv python. Default derives from $HOME (works on any host where
+# Hermes is installed at the standard location); override with HERMES_VENV_PYTHON
+# for a non-standard install. (Avoids a hardcoded deanonymizing home path.)
 _HERMES_VENV_PYTHON: Final[Path] = Path(
-    "/home/jim/.hermes/hermes-agent/venv/bin/python"
+    os.environ.get(
+        "HERMES_VENV_PYTHON",
+        str(Path.home() / ".hermes" / "hermes-agent" / "venv" / "bin" / "python"),
+    )
 )
 
 
@@ -246,7 +252,8 @@ class HermesSession:
         if not _HERMES_VENV_PYTHON.is_file():
             pytest.skip(
                 f"Hermes venv python not found at {_HERMES_VENV_PYTHON}; "
-                "this test requires Hermes installed at /home/jim/.hermes/hermes-agent/"
+                "this test requires Hermes installed (set HERMES_VENV_PYTHON to "
+                "override the default ~/.hermes/hermes-agent/venv path)"
             )
         script = _build_session_script(
             method=method,

@@ -205,8 +205,8 @@ describe("resolveSyncRepoDir — local-path classification + expansion (P2-4, mi
 describe("getProjectMemoryDir", () => {
   it("encodes the cwd under the projects dir", () => {
     const projectsDir = "/data/hermes/cache/memex/projects";
-    const dir = getProjectMemoryDir("/home/jim/work", projectsDir);
-    expect(dir).toBe(join(projectsDir, "-home-jim-work", "memory"));
+    const dir = getProjectMemoryDir("/home/operator/work", projectsDir);
+    expect(dir).toBe(join(projectsDir, "-home-operator-work", "memory"));
   });
 });
 
