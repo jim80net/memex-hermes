@@ -4,6 +4,7 @@
 
 import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { parseFrontmatter } from "@jim80net/memex-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { HermesConfig } from "../../src/core/config.ts";
 import { DEFAULT_CONFIG } from "../../src/core/config.ts";
@@ -60,7 +61,12 @@ describe("memex_remember commit/push (#6)", () => {
     const memDir = join(clone, "global", "memory");
     const files = await listMd(memDir);
     expect(files.length).toBe(1);
-    const body = await readFile(join(memDir, files[0]), "utf-8");
+    const raw = await readFile(join(memDir, files[0]), "utf-8");
+    // Portability is about parseable ENTRIES, not just bytes: the file another
+    // adapter pulls must parse back to the shared frontmatter shape.
+    const { meta, body } = parseFrontmatter(raw);
+    expect(meta.type).toBe("memory");
+    expect(typeof meta.name).toBe("string");
     expect(body).toContain(payload);
   });
 

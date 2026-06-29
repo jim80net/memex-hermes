@@ -2,7 +2,7 @@
 // both Hermes.session-end and memex_remember.
 
 import { execFile } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Logger } from "@jim80net/memex-core";
@@ -74,7 +74,7 @@ describe("commitAndMaybePush", () => {
     });
     expect(res).toEqual({ committed: true, pushed: true });
     const clone = await cloneRemote(remoteDir, join(root, "v"));
-    await import("node:fs/promises").then((m) => m.readFile(join(clone, rel), "utf-8"));
+    expect(await readFile(join(clone, rel), "utf-8")).toContain("alpha");
   });
 
   it("suppresses push for a _session/ project id (commits only)", async () => {
@@ -142,29 +142,25 @@ describe("commitAndMaybePush", () => {
     expect(warns.filter((w) => !w.includes("nothing to commit"))).toEqual([]);
   });
 
-  it("a genuine commit failure logs a warning", async () => {
-    // A syncRepoDir that is NOT a git repo and whose repo points at a
-    // non-existent path: initSyncRepo's clone fails → git init + add, but the
-    // commit needs a user identity which an isolated repo lacks → commit errors.
-    const syncRepoDir = join(root, "norepo");
-    await mkdir(syncRepoDir, { recursive: true });
+  it("a genuine (non-benign) git failure logs a warning", async () => {
+    // Deterministic genuine failure (env-independent): hold the index lock so
+    // `git add`/`git commit` fail for a real reason — NOT the benign
+    // "nothing to commit" family — which must surface a warning.
+    const { syncRepoDir, remoteDir } = await setupBareRemoteAndClone(root);
     const rel = await writeEntry(syncRepoDir, "global/memory/a.md", "a");
+    await writeFile(join(syncRepoDir, ".git", "index.lock"), "", "utf-8");
     const { logger, warns } = collectingLogger();
+
     const res = await commitAndMaybePush({
       syncRepoDir,
       addPaths: [rel],
       message: "genuine fail",
       projectId: null,
-      // Disable the global git identity so commit fails for a real reason.
-      sync: policy(join(root, "nonexistent.git")),
+      sync: policy(remoteDir),
       logger,
     });
-    // Either the commit failed (warn logged) or — if a global git identity
-    // exists in the environment — it committed; assert the contract holds in
-    // both: a non-"nothing to commit" failure must surface a warning.
-    if (!res.committed) {
-      expect(warns.some((w) => w.includes("commit failed") || w.includes("add failed"))).toBe(true);
-    }
+    expect(res).toEqual({ committed: false, pushed: false });
+    expect(warns.some((w) => w.includes("failed"))).toBe(true);
   });
 
   it("commits only the given paths, not a concurrent sibling's staged file", async () => {
@@ -185,8 +181,7 @@ describe("commitAndMaybePush", () => {
 
     // The remote has mine.md but NOT sibling.md (path-scoped commit).
     const clone = await cloneRemote(remoteDir, join(root, "v"));
-    const fs = await import("node:fs/promises");
-    await fs.readFile(join(clone, mine), "utf-8");
-    await expect(fs.readFile(join(clone, sibling), "utf-8")).rejects.toThrow();
+    expect(await readFile(join(clone, mine), "utf-8")).toContain("mine");
+    await expect(readFile(join(clone, sibling), "utf-8")).rejects.toThrow();
   });
 });

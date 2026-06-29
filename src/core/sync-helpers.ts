@@ -31,11 +31,12 @@ export interface PushResult {
 
 /**
  * The sync policy `commitAndMaybePush` needs. Structurally `HermesSyncConfig`
- * (a `SyncConfig` plus `autoCommitPush`/`pushRetries`) — kept as a local type so
- * sync-helpers stays decoupled from config.ts, and assignable to `SyncConfig`
- * for `initSyncRepo`. Callers pass `config.sync` directly.
+ * (`SyncConfig` — which already carries `enabled`/`repo`/`autoCommitPush` — plus
+ * the Hermes-only `pushRetries`). Kept as a local type so sync-helpers stays
+ * decoupled from config.ts, and assignable to `SyncConfig` for `initSyncRepo`.
+ * Callers pass `config.sync` directly.
  */
-export type CommitPushPolicy = SyncConfig & { autoCommitPush: boolean; pushRetries: number };
+export type CommitPushPolicy = SyncConfig & { pushRetries: number };
 
 export interface CommitAndPushResult {
   /** A commit was created in the local sync repo for the given paths. */
@@ -170,7 +171,15 @@ export async function commitAndMaybePush(args: {
     return { committed: false, pushed: false };
   }
 
-  await initSyncRepo(sync, syncRepoDir);
+  // initSyncRepo can throw (mkdir EACCES, a corrupted repo, git init failure).
+  // The file is already written; a sync-init failure must NOT turn a successful
+  // local write into a thrown tool error — degrade to "not committed" + a warn.
+  try {
+    await initSyncRepo(sync, syncRepoDir);
+  } catch (err) {
+    logger?.warn(`memex-hermes[sync]: initSyncRepo failed: ${errorMessage(err)}`);
+    return { committed: false, pushed: false };
+  }
 
   try {
     await runGit(["add", ...addPaths], syncRepoDir);
@@ -182,9 +191,10 @@ export async function commitAndMaybePush(args: {
   try {
     await runGit(["commit", "-m", message, "--", ...addPaths], syncRepoDir);
   } catch (err) {
-    const reason = errorMessage(err);
-    if (!isNothingToCommit(reason)) {
-      logger?.warn(`memex-hermes[sync]: git commit failed: ${reason}`);
+    // Classify the benign "nothing to commit" family from the FULL output
+    // (git prints it to stdout); a genuine failure still logs (stderr-only).
+    if (!isNothingToCommit(gitOutputText(err))) {
+      logger?.warn(`memex-hermes[sync]: git commit failed: ${errorMessage(err)}`);
     }
     return { committed: false, pushed: false };
   }
@@ -246,28 +256,48 @@ function isNonFastForward(reason: string): boolean {
  * git's "nothing to commit" family is a BENIGN outcome (no error), and git
  * prints it to STDOUT (not stderr) with several wordings depending on the
  * working-tree state — "nothing to commit, working tree clean", "nothing added
- * to commit but untracked files present", "no changes added to commit". Match
- * the family so a genuine commit failure (e.g. a missing identity) is still
- * surfaced while a no-op commit stays silent.
+ * to commit but untracked files present", "no changes added to commit", or
+ * "pathspec ... did not match" when nothing was staged. Match the family so a
+ * genuine commit failure (e.g. a missing identity) is still surfaced while a
+ * no-op commit stays silent.
  */
 function isNothingToCommit(reason: string): boolean {
   const r = reason.toLowerCase();
   return (
     r.includes("nothing to commit") ||
     r.includes("nothing added to commit") ||
-    r.includes("no changes added to commit")
+    r.includes("no changes added to commit") ||
+    r.includes("did not match any file")
   );
 }
 
+/**
+ * The full git output (message + stdout + stderr) for BENIGN-outcome
+ * classification only. git prints the "nothing to commit" family to STDOUT, so
+ * detecting it needs stdout — but this MUST NOT feed the push classifier
+ * (`isNonFastForward`), which owns stderr (a hook/credential-helper line on
+ * stdout containing "rejected" must never flip a push retry decision). Kept
+ * separate from `errorMessage` for exactly that reason.
+ */
+function gitOutputText(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const e = err as Error & { stdout?: string | Buffer; stderr?: string | Buffer };
+  return [err.message, e.stdout?.toString() ?? "", e.stderr?.toString() ?? ""].join("\n");
+}
+
+/**
+ * Human-readable error text for LOGGING and the push non-fast-forward
+ * classifier. Reads stderr only (the stream git uses for push rejections), so a
+ * classifier fed from this never sees stdout hook/helper noise.
+ */
 function errorMessage(err: unknown): string {
   if (err instanceof Error) {
-    const e = err as Error & { stderr?: string | Buffer; stdout?: string | Buffer };
-    // git writes some benign outcomes (the "nothing to commit" family) to
-    // STDOUT and rejections to STDERR — include both so callers can classify.
-    const extra = [e.stdout?.toString() ?? "", e.stderr?.toString() ?? ""]
-      .filter((s) => s.length > 0)
-      .join("\n");
-    return extra.length > 0 ? `${err.message}\n${extra}` : err.message;
+    const withStderr = err as Error & { stderr?: string | Buffer };
+    if (withStderr.stderr) {
+      const s = withStderr.stderr.toString();
+      if (s.length > 0) return `${err.message}\n${s}`;
+    }
+    return err.message;
   }
   return String(err);
 }
