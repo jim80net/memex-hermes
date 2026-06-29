@@ -24,3 +24,6 @@ spike/*-trace.log
 # Editors / OS
 .DS_Store
 *.swp
+
+# Internal session machinery (kept locally as memory; not shipped on the public repo)
+.claude/handoffs/
