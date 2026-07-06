@@ -1,15 +1,11 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  DEFAULT_CORE_CONFIG,
-  SkillIndex,
-  encodePortableLocation,
-} from "@jim80net/memex-core";
 import type { EmbeddingProvider } from "@jim80net/memex-core";
-import { buildHermesScanRoots } from "../../src/core/scan-roots.ts";
+import { DEFAULT_CORE_CONFIG, encodePortableLocation, SkillIndex } from "@jim80net/memex-core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HermesPaths } from "../../src/core/hermes-paths.ts";
+import { buildHermesScanRoots } from "../../src/core/scan-roots.ts";
 
 const SKILL_BODY = "Recall via portable handle.";
 

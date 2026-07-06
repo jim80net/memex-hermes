@@ -1,9 +1,9 @@
+import type { ScanDirs, ScanRootRegistry } from "@jim80net/memex-core";
 import {
   buildScanRoots,
   findMatchingProjectMemoryDirs,
   getSyncScanDirs,
 } from "@jim80net/memex-core";
-import type { ScanDirs, ScanRootRegistry, SyncConfig } from "@jim80net/memex-core";
 import type { HermesConfig } from "./config.ts";
 import { parseExternalDirs } from "./hermes-config-yaml.ts";
 import {

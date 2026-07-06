@@ -1,12 +1,12 @@
 // Cross-adapter location-handle conformance guard (memex-core#32 freeze-SHA memo).
 
-import { describe, expect, it } from "vitest";
 import {
   buildScanRoots,
   decodePortableLocation,
   encodePortableLocation,
   type ScanRootContext,
 } from "@jim80net/memex-core";
+import { describe, expect, it } from "vitest";
 import { LOCATION_ROUND_TRIP_GOLDEN } from "../fixtures/cross-adapter/location-round-trip-golden.ts";
 
 const FIXTURE_CTX: ScanRootContext = {

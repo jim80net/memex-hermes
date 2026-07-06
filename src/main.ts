@@ -11,9 +11,13 @@
 // paid up-front, the warm-cache fast path keeps it cheap on rebuild.
 
 import { join } from "node:path";
-import type { EmbeddingProvider, Logger, SkillIndex as SkillIndexCtor } from "@jim80net/memex-core";
+import type {
+  EmbeddingProvider,
+  Logger,
+  ScanRootRegistry,
+  SkillIndex as SkillIndexCtor,
+} from "@jim80net/memex-core";
 import { LocalEmbeddingProvider, SkillIndex } from "@jim80net/memex-core";
-import type { ScanRootRegistry } from "@jim80net/memex-core";
 import type { HermesConfig } from "./core/config.ts";
 import { loadConfig } from "./core/config.ts";
 import {
@@ -31,11 +35,7 @@ import {
   type HermesToolRememberArgs,
   type HermesToolSearchArgs,
 } from "./core/envelope.ts";
-import {
-  applySyncRepoOverride,
-  getHermesPaths,
-  type HermesPaths,
-} from "./core/hermes-paths.ts";
+import { applySyncRepoOverride, getHermesPaths, type HermesPaths } from "./core/hermes-paths.ts";
 import { assembleHermesScanDirs, buildHermesScanRoots } from "./core/scan-roots.ts";
 import { handleHealth } from "./hooks/health.ts";
 import { handleInit } from "./hooks/init.ts";
@@ -246,8 +246,7 @@ async function getIndex(
 
   const scanDirs = await assembleHermesScanDirs(config, paths, cwd);
   const registry = buildHermesScanRoots(cwd, paths, scanDirs, config.sync.enabled);
-  const index =
-    options.index ?? new SkillIndex(config, provider, cachePath, { registry });
+  const index = options.index ?? new SkillIndex(config, provider, cachePath, { registry });
 
   try {
     await index.build(scanDirs);

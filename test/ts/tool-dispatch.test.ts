@@ -2,7 +2,7 @@
 // tool-recall return shapes match the spec, defaults are applied, threshold
 // and limit honored.
 
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { HermesConfig } from "../../src/core/config.ts";

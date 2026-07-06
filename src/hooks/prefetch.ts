@@ -73,11 +73,9 @@ export async function handlePrefetch(
         section = `## Recalled Memory: ${skill.name} (relevance: ${relevance})\n\n${body}`;
       }
     } else {
-      const { filePath: displayPath } = resolvePortableLocationResolved(
-        registry,
-        skill.location,
-        { allowAbsolute: true },
-      );
+      const { filePath: displayPath } = resolvePortableLocationResolved(registry, skill.location, {
+        allowAbsolute: true,
+      });
       section =
         `## Available Skill: ${skill.name} (relevance: ${relevance})\n\n` +
         `**${skill.name}**: ${skill.description}\n\n` +

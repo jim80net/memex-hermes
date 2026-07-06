@@ -1,11 +1,8 @@
 import { join } from "node:path";
+import { decodePortableLocation, encodePortableLocation } from "@jim80net/memex-core";
 import { describe, expect, it } from "vitest";
-import {
-  encodePortableLocation,
-  decodePortableLocation,
-} from "@jim80net/memex-core";
-import { buildHermesScanRoots } from "../../src/core/scan-roots.ts";
 import type { HermesPaths } from "../../src/core/hermes-paths.ts";
+import { buildHermesScanRoots } from "../../src/core/scan-roots.ts";
 
 describe("buildHermesScanRoots", () => {
   const cwd = "/home/user/project";
