@@ -3,7 +3,6 @@
 // {name,type,score,location,snippet}]}`. Threshold is taken from the dedicated
 // `tools.memex_search.threshold` config field, not the prefetch threshold.
 
-import { readFile } from "node:fs/promises";
 import type { SkillIndex } from "@jim80net/memex-core";
 import type { HermesConfig } from "../core/config.ts";
 import type {
@@ -44,7 +43,7 @@ export async function handleToolSearch(
       type: r.skill.type,
       score: r.score,
       location: r.skill.location,
-      snippet: await readSnippet(r.skill.location),
+      snippet: await readSnippet(index, r.skill.location),
     });
   }
   return { results: shaped };
@@ -60,11 +59,10 @@ export async function handleToolSearch(
 // a bare `any`.
 type HermesToolSearchInputTypes = Parameters<SkillIndex["search"]>[3];
 
-async function readSnippet(location: string): Promise<string | undefined> {
-  const path = location.includes("#") ? location.split("#")[0] : location;
+async function readSnippet(index: SkillIndex, location: string): Promise<string | undefined> {
   try {
-    const raw = await readFile(path, "utf-8");
-    return raw.slice(0, SNIPPET_CHARS);
+    const body = await index.readSkillContent(location);
+    return body.slice(0, SNIPPET_CHARS);
   } catch {
     return undefined;
   }

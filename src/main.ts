@@ -14,15 +14,10 @@ import { join } from "node:path";
 import type {
   EmbeddingProvider,
   Logger,
-  ScanDirs,
+  ScanRootRegistry,
   SkillIndex as SkillIndexCtor,
 } from "@jim80net/memex-core";
-import {
-  findMatchingProjectMemoryDirs,
-  getSyncScanDirs,
-  LocalEmbeddingProvider,
-  SkillIndex,
-} from "@jim80net/memex-core";
+import { LocalEmbeddingProvider, SkillIndex } from "@jim80net/memex-core";
 import type { HermesConfig } from "./core/config.ts";
 import { loadConfig } from "./core/config.ts";
 import {
@@ -40,15 +35,8 @@ import {
   type HermesToolRememberArgs,
   type HermesToolSearchArgs,
 } from "./core/envelope.ts";
-import { parseExternalDirs } from "./core/hermes-config-yaml.ts";
-import {
-  applySyncRepoOverride,
-  getHermesPaths,
-  getProjectMemoryDir,
-  getProjectSkillsDir,
-  type HermesPaths,
-  projectPluginsEnabled,
-} from "./core/hermes-paths.ts";
+import { applySyncRepoOverride, getHermesPaths, type HermesPaths } from "./core/hermes-paths.ts";
+import { assembleHermesScanDirs, buildHermesScanRoots } from "./core/scan-roots.ts";
 import { handleHealth } from "./hooks/health.ts";
 import { handleInit } from "./hooks/init.ts";
 import { handleMemoryWrite } from "./hooks/memory-write.ts";
@@ -91,7 +79,7 @@ export async function dispatch(
   // rides in the args of write events when the Python provider forwards it.
   seedFromEnvelope({ sessionId, agentContext: readAgentContext(input.args) });
 
-  const { provider, index } = await getIndex(config, paths, cwd, options);
+  const { provider, index, registry } = await getIndex(config, paths, cwd, options);
 
   switch (input.hook_event_name) {
     case HERMES_EVENTS.HEALTH:
@@ -114,6 +102,7 @@ export async function dispatch(
         config,
         paths,
         sessionId,
+        registry,
         logger,
       );
     case HERMES_EVENTS.QUEUE_PREFETCH:
@@ -243,16 +232,22 @@ async function getIndex(
   paths: HermesPaths,
   cwd: string,
   options: DispatchOptions,
-): Promise<{ provider: EmbeddingProvider; index: SkillIndexCtor }> {
+): Promise<{ provider: EmbeddingProvider; index: SkillIndexCtor; registry: ScanRootRegistry }> {
   if (options.index && options.provider) {
-    return { provider: options.provider, index: options.index };
+    return {
+      provider: options.provider,
+      index: options.index,
+      registry: [],
+    };
   }
   const provider =
     options.provider ?? new LocalEmbeddingProvider(config.embeddingModel, paths.modelsDir);
   const cachePath = join(paths.cacheDir, "memex-cache.json");
-  const index = options.index ?? new SkillIndex(config, provider, cachePath);
 
-  const scanDirs = await buildScanDirs(config, paths, cwd);
+  const scanDirs = await assembleHermesScanDirs(config, paths, cwd);
+  const registry = buildHermesScanRoots(cwd, paths, scanDirs, config.sync.enabled);
+  const index = options.index ?? new SkillIndex(config, provider, cachePath, { registry });
+
   try {
     await index.build(scanDirs);
   } catch (err) {
@@ -260,43 +255,7 @@ async function getIndex(
       `memex-hermes: index build failed: ${err instanceof Error ? err.message : err}\n`,
     );
   }
-  return { provider, index };
-}
-
-async function buildScanDirs(
-  config: HermesConfig,
-  paths: HermesPaths,
-  cwd: string,
-): Promise<ScanDirs> {
-  const skillDirs: string[] = [paths.globalSkillsDir];
-  if (cwd.length > 0 && projectPluginsEnabled()) {
-    skillDirs.push(getProjectSkillsDir(cwd));
-  }
-  skillDirs.push(...config.skillDirs);
-  skillDirs.push(...parseExternalDirs(paths.hermesHome));
-
-  const memoryDirs: string[] = [];
-  if (cwd.length > 0) {
-    memoryDirs.push(getProjectMemoryDir(cwd, paths.projectsDir));
-  }
-  memoryDirs.push(...config.memoryDirs);
-
-  // Rules live in the skills dir per C5, so no separate ruleDirs are
-  // configured. The MemexPaths contract still demands a globalRulesDir
-  // which we point at the same skills dir; passing it through ScanDirs
-  // would double-scan, so we deliberately leave ruleDirs empty.
-  const scanDirs: ScanDirs = { skillDirs, memoryDirs, ruleDirs: [] };
-
-  if (config.sync.enabled) {
-    const syncDirs = getSyncScanDirs(paths.syncRepoDir);
-    scanDirs.skillDirs.push(syncDirs.skillsDir);
-    if (cwd.length > 0) {
-      const syncMem = await findMatchingProjectMemoryDirs(cwd, paths.syncRepoDir, config.sync);
-      scanDirs.memoryDirs.push(...syncMem);
-    }
-  }
-
-  return scanDirs;
+  return { provider, index, registry };
 }
 
 // Narrow the optional agent_context carried in a write event's args. The Python

@@ -25,7 +25,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
-    "@jim80net/memex-core": "^0.4.0"
+    "@jim80net/memex-core": "^0.5.0"
   },
   "packageManager": "pnpm@9.15.0"
 }
