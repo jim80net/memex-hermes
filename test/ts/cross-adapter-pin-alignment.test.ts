@@ -25,7 +25,8 @@ import { describe, expect, it } from "vitest";
 // When memex-claude bumps either, bump here in the same change.
 const CROSS_ADAPTER_TRANSFORMERS_RANGE = "^3.8.1";
 const CROSS_ADAPTER_TRANSFORMERS_RESOLVED = "3.8.1";
-const CROSS_ADAPTER_MEMEX_CORE_RANGE = "^0.4.0";
+const CROSS_ADAPTER_MEMEX_CORE_RANGE = "^0.5.0";
+const CROSS_ADAPTER_MEMEX_CORE_RESOLVED = "0.5.0";
 
 function readJson(relFromRepoRoot: string): Record<string, unknown> {
   // test/ts/<file> → repo root is two levels up.
@@ -67,6 +68,11 @@ describe("cross-adapter version-pin alignment (#4 / Tier 2)", () => {
       // installed (bundled) version that determines the embedding vector space.
       const installed = readJson("node_modules/@huggingface/transformers/package.json");
       expect(installed.version).toBe(CROSS_ADAPTER_TRANSFORMERS_RESOLVED);
+    });
+
+    it("the INSTALLED @jim80net/memex-core version equals the reference", () => {
+      const installed = readJson("node_modules/@jim80net/memex-core/package.json");
+      expect(installed.version).toBe(CROSS_ADAPTER_MEMEX_CORE_RESOLVED);
     });
 
     it("memex-hermes's transformers range equals the INSTALLED memex-core's range", () => {

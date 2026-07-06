@@ -12,9 +12,7 @@
 // affordance was never implemented, so it has been dropped from the contract
 // rather than advertise an ignored parameter.)
 
-import { readFile } from "node:fs/promises";
 import type { SkillIndex } from "@jim80net/memex-core";
-import { parseFrontmatter } from "@jim80net/memex-core";
 import type {
   HermesToolRecallArgs,
   HermesToolRecallEntry,
@@ -45,7 +43,7 @@ export async function handleToolRecall(
   const hit = results.find((r) => r.skill.name === wanted);
   if (!hit) return { entries: [] };
 
-  const entry = await loadEntry(hit.skill.name, hit.skill.location);
+  const entry = await loadEntry(index, hit.skill.name, hit.skill.location);
   return { entries: entry ? [entry] : [] };
 }
 
@@ -53,12 +51,14 @@ export async function handleToolRecall(
 // Private
 // ---------------------------------------------------------------------------
 
-async function loadEntry(name: string, location: string): Promise<HermesToolRecallEntry | null> {
-  const path = location.includes("#") ? location.split("#")[0] : location;
+async function loadEntry(
+  index: SkillIndex,
+  name: string,
+  location: string,
+): Promise<HermesToolRecallEntry | null> {
   try {
-    const raw = await readFile(path, "utf-8");
-    const { body } = parseFrontmatter(raw);
-    return { name, content: body.trim() };
+    const content = await index.readSkillContent(location);
+    return { name, content: content.trim() };
   } catch {
     return null;
   }

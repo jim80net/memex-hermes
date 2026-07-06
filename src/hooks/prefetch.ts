@@ -13,7 +13,8 @@
 // completed and the model has had a chance to USE the injection).
 
 import { mkdir } from "node:fs/promises";
-import type { Logger, SkillIndex } from "@jim80net/memex-core";
+import type { Logger, ScanRootRegistry, SkillIndex } from "@jim80net/memex-core";
+import { resolvePortableLocationResolved } from "@jim80net/memex-core";
 import type { HermesConfig } from "../core/config.ts";
 import type { HermesPrefetchArgs, HermesPrefetchOutput } from "../core/envelope.ts";
 import type { HermesPaths } from "../core/hermes-paths.ts";
@@ -27,6 +28,7 @@ export async function handlePrefetch(
   config: HermesConfig,
   paths: HermesPaths,
   sessionId: string,
+  registry: ScanRootRegistry = [],
   logger?: Logger,
 ): Promise<HermesPrefetchOutput> {
   const query = args?.query?.trim();
@@ -71,10 +73,15 @@ export async function handlePrefetch(
         section = `## Recalled Memory: ${skill.name} (relevance: ${relevance})\n\n${body}`;
       }
     } else {
+      const { filePath: displayPath } = resolvePortableLocationResolved(
+        registry,
+        skill.location,
+        { allowAbsolute: true },
+      );
       section =
         `## Available Skill: ${skill.name} (relevance: ${relevance})\n\n` +
         `**${skill.name}**: ${skill.description}\n\n` +
-        `To use this skill, read the full instructions at: \`${skill.location}\``;
+        `To use this skill, read the full instructions at: \`${displayPath}\``;
     }
 
     if (section === null) continue;

@@ -209,4 +209,28 @@ describe("handlePrefetch", () => {
     await handlePrefetch({ query: "skill1" }, idx as never, config, makeFakePaths(root), "s-types");
     expect(idx.lastSearch?.types).toEqual(["memory"]);
   });
+
+  it("skill teaser resolves memex:// handle to absolute path for display", async () => {
+    const absolute = "/home/user/.hermes/skills/verify/SKILL.md";
+    const handle = "memex://hermes-global/verify/SKILL.md";
+    const skill = makeSkill({
+      name: "verify-fix",
+      type: "skill",
+      location: handle,
+      description: "Trace callers.",
+    });
+    const idx = new FakeSkillIndex([{ skill, score: 0.8, bestQueryIndex: 0 }]);
+    const registry = [{ key: "hermes-global", rootPath: "/home/user/.hermes/skills" }];
+    const out = await handlePrefetch(
+      { query: "verify" },
+      idx as never,
+      DEFAULT_CONFIG,
+      makeFakePaths(root),
+      "s-teaser",
+      registry,
+    );
+    const ctx = (out as { additionalContext?: string }).additionalContext ?? "";
+    expect(ctx).toContain(absolute);
+    expect(ctx).not.toContain(handle);
+  });
 });

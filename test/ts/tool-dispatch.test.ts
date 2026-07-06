@@ -91,6 +91,17 @@ describe("handleToolSearch", () => {
     const out = await handleToolSearch({ query: "  " }, idx as never, DEFAULT_CONFIG);
     expect(out.results).toEqual([]);
   });
+
+  it("snippet uses readSkillContent for portable handles", async () => {
+    const handle = "memex://hermes-global/foo/SKILL.md";
+    const body = "snippet body text";
+    const idx = new FakeSkillIndex(
+      [{ skill: makeSkill({ name: "foo", location: handle }), score: 0.9, bestQueryIndex: 0 }],
+      new Map([[handle, body]]),
+    );
+    const out = await handleToolSearch({ query: "foo" }, idx as never, DEFAULT_CONFIG);
+    expect(out.results[0]?.snippet).toBe(body);
+  });
 });
 
 describe("handleToolRemember", () => {
@@ -214,23 +225,30 @@ describe("handleToolRemember", () => {
 });
 
 describe("handleToolRecall", () => {
-  it("returns the named entry with its full body (frontmatter stripped)", async () => {
-    const skill = makeSkill({ name: "my-skill", type: "skill" });
+  it("returns the named entry with its full body via readSkillContent", async () => {
+    const body = "actual content body";
+    const handle = "memex://hermes-global/my-skill/SKILL.md";
+    const skill = makeSkill({ name: "my-skill", type: "skill", location: handle });
     const fakeIndex = new FakeSkillIndex(
       [{ skill, score: 0.9, bestQueryIndex: 0 }],
-      // The recall handler reads the file from disk, so we need a real file:
+      new Map([[handle, body]]),
     );
-    // Recall reads the file from disk; produce a real one in a tmpdir.
-    const root = await makeTmpRoot();
-    const path = join(root, "SKILL.md");
-    const body = "actual content body";
-    skill.location = path;
-    await writeFile(path, `---\nname: my-skill\ntype: skill\n---\n${body}\n`, "utf-8");
     const out = await handleToolRecall({ name: "my-skill" }, fakeIndex as never);
     expect(out.entries.length).toBe(1);
     expect(out.entries[0].name).toBe("my-skill");
     expect(out.entries[0].content).toBe(body);
-    await rm(root, { recursive: true, force: true });
+  });
+
+  it("recalls memory section via portable handle (not raw readFile split)", async () => {
+    const sectionBody = "section-specific body";
+    const handle = "memex://hermes-global/memories/notes.md#Deploy%20Notes";
+    const skill = makeSkill({ name: "deploy-notes", type: "memory", location: handle });
+    const fakeIndex = new FakeSkillIndex(
+      [{ skill, score: 0.9, bestQueryIndex: 0 }],
+      new Map([[handle, sectionBody]]),
+    );
+    const out = await handleToolRecall({ name: "deploy-notes" }, fakeIndex as never);
+    expect(out.entries[0]?.content).toBe(sectionBody);
   });
 
   it("missing entry returns empty entries array", async () => {
