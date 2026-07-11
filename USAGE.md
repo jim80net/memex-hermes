@@ -161,10 +161,13 @@ Runs at `Hermes.session-end`. Extracts learnings from the session into memex ski
 
 Cross-machine sync via a private git repo. See [Cross-platform sync](#cross-platform-sync) below.
 
+When `enabled` is true, `Hermes.init` also **projects** shared-origin `skills/` into `$HERMES_HOME/skills` as absolute symlinks (`@jim80net/memex-core` `resolveOriginRoot` / `planProjection` / `applyProjection`). Rules stay under skills with `type: rule` (C5 — no `$HERMES_HOME/rules/`). Real local skill dirs are never clobbered. With projection active, the index scans harness skills only (not a second raw checkout `skills/` path). Memory delivery remains provider prefetch + tools + MEMORY.md — not an inject-first redesign. Mass migrate to `~/.memex` is **opt-in**; the core resolver already walks product / XDG / legacy-claude origins.
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | boolean | `false` | Enable/disable sync |
-| `repo` | string | `""` | Git URL of the sync repo |
+| `enabled` | boolean | `false` | Enable/disable sync **and** skills projection |
+| `repo` | string | `""` | Git URL of the sync repo, or a local filesystem path (also used as origin override when local) |
+| `repoDir` | string | unset | Optional shared-origin root override for projection (does not by itself move the C6 write/push checkout) |
 | `autoPull` | boolean | `true` | Pull from remote on session start (`Hermes.init`) |
 | `autoCommitPush` | boolean | `true` | Commit and push changes on `sync_turn` / `on_memory_write` / `session-end` |
 | `suppressSessionIds` | boolean | `true` | Never push `_session/<id>` project entries to remote (project decision C12 — sessions without a meaningful cwd are local-cache-only) |

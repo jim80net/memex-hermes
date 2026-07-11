@@ -147,6 +147,34 @@ EOF
 
 Then test by typing "is memex working" in your next Hermes turn.
 
+### 5b. Shared origin + skills projection (G3)
+
+When `sync.enabled: true` in `$HERMES_HOME/memex.json`, memex projects origin `skills/` into `$HERMES_HOME/skills` as **symlinks** (core `planProjection` / `applyProjection`). Rules remain skill dirs with `type: rule` — there is still **no** `$HERMES_HOME/rules/`.
+
+```bash
+# Profile set?
+python3 -c "import json,os; p=os.path.expanduser('${HERMES_HOME}/memex.json');\
+print(json.load(open(p)).get('sync',{}).get('enabled', False) if os.path.isfile(p) else False)"
+
+# After a Hermes session init (or first turn), managed skills should be links into origin:
+ls -la "$HERMES_HOME/skills/" 2>/dev/null
+# For each projected skill dir:
+#   readlink -f "$HERMES_HOME/skills/<name>"  → under origin root (~/.memex, override, or legacy)
+# Real directories at the same name are FAIL-CLOSED conflicts (not clobbered).
+
+# Health probe (stderr may note missing origin when profile is set):
+echo '{"hook_event_name":"Hermes.health","args":{},"session_id":"diag","cwd":"/tmp"}' \
+  | "$HERMES_HOME/cache/memex/bin/memex" 2>&1
+```
+
+**Memory surface (Hermes, not Grok MCP-only):** provider prefetch + `memex_*` tools + MEMORY.md/USER.md remain first-class. Prefer file-shaped skills over inventing new inject paths.
+
+**Fixes:**
+- Profile off → set `"sync": { "enabled": true }` in memex.json; start a session so `Hermes.init` projects.
+- Origin missing → create origin skills under resolved root, or set `sync.repoDir` / local-path `sync.repo`.
+- Conflicts → rename local real dir or remove it if intentional to take origin link.
+- Double-index → with projection active the adapter must not also scan raw checkout `skills/`; if you see duplicate hits, report a bug.
+
 ### 6. Embedding model cache and skill index
 
 ```bash
@@ -199,5 +227,8 @@ If `Hermes.prefetch` returns context but nothing surfaces in a real Hermes sessi
 | Stale results | Cache not rebuilding | Delete `$HERMES_HOME/cache/memex/memex-cache.json` |
 | MEMORY.md edits not mirroring | `Hermes.memory-write` AND `Hermes.sync-turn` mtime-watcher both should be running | Verify by editing MEMORY.md directly and checking the next turn; `remove` actions arrive only via the mtime-watcher (per `SPIKE-COMPLETE.md` Q1) |
 | Sync not pushing | `_session/*` project ID (no real cwd) | Use `memex_remember` with `scope: 'project'` to promote; or run Hermes from inside a real project dir |
+| Skills not linked from origin | `sync.enabled` false or init never ran | Enable sync; start a Hermes session (step 5b) |
+| Local skill name conflict | Real dir at managed name | Fail-closed — rename local or remove to allow symlink |
+| `$HERMES_HOME/rules/` missing | Expected (C5) | Rules live under `skills/<name>/SKILL.md` with `type: rule` |
 
 $ARGUMENTS
