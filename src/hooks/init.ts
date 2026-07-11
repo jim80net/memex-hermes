@@ -1,5 +1,6 @@
 // Hermes.init — register cwd in the project registry, optionally pull the
-// sync repo, and capture the per-session agent_context.
+// sync repo, project shared-origin skills into the harness, and capture the
+// per-session agent_context.
 
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -15,6 +16,7 @@ import {
 import type { HermesConfig } from "../core/config.ts";
 import type { HermesInitArgs, HermesInitOutput } from "../core/envelope.ts";
 import type { HermesPaths } from "../core/hermes-paths.ts";
+import { isProjectionProfileSet, runHermesProjection } from "../core/projection.ts";
 import { captureInit } from "../state.ts";
 
 export async function handleInit(
@@ -61,6 +63,23 @@ export async function handleInit(
       } catch (err) {
         logger?.warn(`memex-hermes[init]: sync pull failed: ${errMsg(err)}`);
       }
+    }
+  }
+
+  // G3: when projection profile is set, symlink origin skills/ into harness
+  // skills (fail-closed; non-fatal on conflicts so session init stays up).
+  if (isProjectionProfileSet(config)) {
+    try {
+      const report = await runHermesProjection({ config, paths, cwd });
+      logger?.info(`memex-hermes[init]: projection — ${report.message}`);
+      const conflicts = report.apply?.conflicts ?? report.plan?.conflicts ?? [];
+      for (const c of conflicts) {
+        logger?.warn(
+          `memex-hermes[init]: projection conflict ${c.targetPath} (${c.reason}) — not clobbered`,
+        );
+      }
+    } catch (err) {
+      logger?.warn(`memex-hermes[init]: projection failed: ${errMsg(err)}`);
     }
   }
 

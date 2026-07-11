@@ -18,6 +18,14 @@ export type HermesSyncConfig = SyncConfig & {
   autoCommitPush: boolean;
   suppressSessionIds: boolean;
   pushRetries: number;
+  /**
+   * Optional shared-origin root override for G3 projection (same role as
+   * memex-grok `sync.repoDir`). When unset, local-path `sync.repo` may supply
+   * the root; otherwise core `resolveOriginRoot` walks product defaults.
+   * Does not replace C6 write/push checkout (`paths.syncRepoDir`) unless the
+   * operator also points the checkout there via a local-path `sync.repo`.
+   */
+  repoDir?: string;
 };
 
 export type PrefetchConfig = {
