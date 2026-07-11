@@ -1,21 +1,31 @@
 # memex-hermes addendum — G3 shared-origin projection (skills + rules-as-skills)
 
 **Date:** 2026-07-11  
-**Status:** design only — **no implementation in this PR**  
-**Authority:** G3 adapter alignment brief (`memex-flotilla/briefs/adapter-alignment-g3-2026-07-11.md`); product steer `flotilla-dispatch-c29001c1`  
-**Pin (impl):** `@jim80net/memex-core@^0.6.0` (npm LIVE; hermes currently pins `^0.5.0` — bump at impl)  
+**Status:** design only — **no implementation in this PR** · wave **LIVE** (CoS AUTHORIZE)  
+**Authority:** G3 adapter alignment brief (`memex-flotilla/briefs/adapter-alignment-g3-2026-07-11.md`); product steer `flotilla-dispatch-c29001c1`; **CoS AUTHORIZE wave 2026-07-11** (same nonce lineage)  
+**Pin (impl):** `@jim80net/memex-core@^0.6.0` (npm LIVE; hermes main today `^0.5.0` → need `^0.6.0`)  
 **Proven path:** memex-grok#30 design + #31 impl (`src/core/projection.ts`)  
 **Parent design:** [`2026-05-25-memex-hermes-adapter-design.md`](./2026-05-25-memex-hermes-adapter-design.md) (C5 rules-in-skills, C6 hermes sync checkout, C7 MEMORY.md, C11 single envelope dispatch)  
 **Core peer:** memex-core `design/shared-origin-sync-profile.md` + `src/origin.ts` (`resolveOriginRoot` / `planProjection` / `applyProjection`)  
-**Scope:** memex-hermes only. Author ≠ merger; surface PRs to **memex** for gate/merge.
+**Scope:** memex-hermes only. Author ≠ merger; surface PRs to **memex** for gate/merge. No freeze-SHA. No codex-memex-dev cutover.
 
 ---
 
 ## 0. Bottom line
 
-Hermes does **not** get a `$HERMES_HOME/rules/` tree. Verified invariant **C5** / openspec `hermes-path-resolution`: rules live under **`$HERMES_HOME/skills/<name>/SKILL.md`** with frontmatter `type: rule`. G3 alignment therefore projects the **shared origin `skills/` tree as skill-dir symlinks** into the real Hermes harness skills paths, using **only** core `resolveOriginRoot` → `planProjection` / `applyProjection` (absolute symlinks; fail-closed; never clobber). Memory delivery stays the existing Hermes surface (provider + prefetch tools + MEMORY.md mirror) — **not** a Grok-style inject-first redesign.
+Hermes does **not** get a `$HERMES_HOME/rules/` tree. Verified invariant **C5** / openspec `hermes-path-resolution`: rules live under **`$HERMES_HOME/skills/<name>/SKILL.md`** with frontmatter `type: rule`. G3 alignment therefore projects the **shared origin `skills/` tree as skill-dir symlinks** into the real Hermes harness skills paths, using **only** core `resolveOriginRoot` → `planProjection` / `applyProjection` (absolute symlinks; fail-closed; never clobber). Memory delivery stays the existing Hermes surface (provider + prefetch tools + MEMORY.md mirror) — **not** a Grok-style inject-first redesign. Prefer **files (skill dirs) over inject**; no invented inject paths.
 
 **Impl gate:** this design passes memex systems-review → pin `memex-core@^0.6.0` → thin `projection.ts` + entrypoints + scan policy + doctor/health messaging → verify plan (no freelancing).
+
+### CoS-locked wave scope (this seat)
+
+| Track | Hermes acceptance |
+|-------|-------------------|
+| **A. Core pin** | Bump `package.json` + lock to `@jim80net/memex-core@^0.6.0`; `pnpm test` / typecheck / python suite green; no silent skew (export surface used by hermes must resolve) |
+| **B. File-shaped projection** | Origin `skills/` → `$HERMES_HOME/skills` via core plan/apply (`entryKind: "skill-dirs"`); rules-as-skills only (C5); profile when `sync.enabled`; fail-closed; no double-index; doctor/health; prefer files over inject |
+| **C. `~/.memex` migrate** | **Opt-in only** — default keep C6 checkout + resolver walk (legacy-claude OK). Mass migrate not required for A/B; operator may set local-path origin/repoDir if they want product root |
+
+**Pin gap:** `^0.5.0` → `^0.6.0` (one minor; origin APIs are additive — expected breakages are type-only if any; call out in impl PR if a hermes import breaks).
 
 ---
 
