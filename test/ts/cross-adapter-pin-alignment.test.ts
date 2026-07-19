@@ -27,7 +27,7 @@ const CROSS_ADAPTER_TRANSFORMERS_RANGE = "^3.8.1";
 const CROSS_ADAPTER_TRANSFORMERS_RESOLVED = "3.8.1";
 // G3 pin matrix 2026-07-11: adapters align on memex-core@^0.6.0 (origin/projection).
 const CROSS_ADAPTER_MEMEX_CORE_RANGE = "^0.6.0";
-const CROSS_ADAPTER_MEMEX_CORE_RESOLVED = "0.6.0";
+const CROSS_ADAPTER_MEMEX_CORE_RESOLVED = "0.6.1";
 
 function readJson(relFromRepoRoot: string): Record<string, unknown> {
   // test/ts/<file> → repo root is two levels up.
