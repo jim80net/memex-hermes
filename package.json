@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/ test/ts/",
     "lint:fix": "biome check --write src/ test/ts/",
+    "audit:prod": "pnpm audit --prod",
     "check": "pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
@@ -25,7 +26,14 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
-    "@jim80net/memex-core": "^0.7.0"
+    "@jim80net/memex-core": "^0.7.1"
   },
-  "packageManager": "pnpm@9.15.0"
+  "packageManager": "pnpm@9.15.0",
+  "pnpm": {
+    "overrides": {
+      "protobufjs": "7.6.5",
+      "sharp": "0.35.3",
+      "tar": "7.5.21"
+    }
+  }
 }
