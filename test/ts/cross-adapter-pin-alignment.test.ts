@@ -15,7 +15,7 @@
 // constants (sourced from memex-claude's package.json, read 2026-06-23), and the
 // resolved/installed versions are read from this repo's own node_modules.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,7 +30,9 @@ const CROSS_ADAPTER_TRANSFORMERS_RESOLVED = "3.8.1";
 // Security-mitigated published-artifact baseline: memex-core@0.7.1.
 const CROSS_ADAPTER_MEMEX_CORE_RANGE = "^0.7.1";
 const CROSS_ADAPTER_MEMEX_CORE_RESOLVED = "0.7.1";
+const APPLICATION_PROTOBUFJS_OVERRIDE = "7.6.5";
 const APPLICATION_SHARP_OVERRIDE = "0.35.3";
+const APPLICATION_TAR_OVERRIDE = "7.5.21";
 
 function readJson(relFromRepoRoot: string): Record<string, unknown> {
   // test/ts/<file> → repo root is two levels up.
@@ -50,6 +52,22 @@ function depRange(pkg: Record<string, unknown>, name: string): string | undefine
     }
   }
   return undefined;
+}
+
+function resolvedPackageVersion(anchorManifest: string, packageName: string): unknown {
+  const entry = createRequire(anchorManifest).resolve(packageName);
+  let directory = dirname(entry);
+
+  for (let depth = 0; depth < 8; depth += 1) {
+    const manifestPath = join(directory, "package.json");
+    if (existsSync(manifestPath)) {
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as Record<string, unknown>;
+      if (manifest.name === packageName) return manifest.version;
+    }
+    directory = dirname(directory);
+  }
+
+  throw new Error(`could not find ${packageName} package manifest from ${entry}`);
 }
 
 describe("cross-adapter version-pin alignment (#4 / Tier 2)", () => {
@@ -96,11 +114,26 @@ describe("cross-adapter version-pin alignment (#4 / Tier 2)", () => {
       const transformersManifest = fileURLToPath(
         new URL("../../node_modules/@huggingface/transformers/package.json", import.meta.url),
       );
-      const sharpEntry = createRequire(transformersManifest).resolve("sharp");
-      const installed = JSON.parse(
-        readFileSync(join(dirname(sharpEntry), "..", "package.json"), "utf-8"),
-      ) as Record<string, unknown>;
-      expect(installed.version).toBe(APPLICATION_SHARP_OVERRIDE);
+      expect(resolvedPackageVersion(transformersManifest, "sharp")).toBe(
+        APPLICATION_SHARP_OVERRIDE,
+      );
+    });
+
+    it("owns patched production audit resolutions", () => {
+      const pnpm = hermesPkg.pnpm as { overrides?: Record<string, string> } | undefined;
+      expect(pnpm?.overrides?.tar).toBe(APPLICATION_TAR_OVERRIDE);
+      expect(pnpm?.overrides?.protobufjs).toBe(APPLICATION_PROTOBUFJS_OVERRIDE);
+
+      const onnxNodeManifest = fileURLToPath(
+        new URL("../../node_modules/onnxruntime-node/package.json", import.meta.url),
+      );
+      const onnxWebManifest = fileURLToPath(
+        new URL("../../node_modules/onnxruntime-web/package.json", import.meta.url),
+      );
+      expect(resolvedPackageVersion(onnxNodeManifest, "tar")).toBe(APPLICATION_TAR_OVERRIDE);
+      expect(resolvedPackageVersion(onnxWebManifest, "protobufjs")).toBe(
+        APPLICATION_PROTOBUFJS_OVERRIDE,
+      );
     });
   });
 });
