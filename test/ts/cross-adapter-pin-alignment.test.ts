@@ -16,6 +16,8 @@
 // resolved/installed versions are read from this repo's own node_modules.
 
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -25,9 +27,10 @@ import { describe, expect, it } from "vitest";
 // When memex-claude bumps either, bump here in the same change.
 const CROSS_ADAPTER_TRANSFORMERS_RANGE = "^3.8.1";
 const CROSS_ADAPTER_TRANSFORMERS_RESOLVED = "3.8.1";
-// Published-artifact baseline: adapters align on memex-core@^0.7.0.
-const CROSS_ADAPTER_MEMEX_CORE_RANGE = "^0.7.0";
-const CROSS_ADAPTER_MEMEX_CORE_RESOLVED = "0.7.0";
+// Security-mitigated published-artifact baseline: memex-core@0.7.1.
+const CROSS_ADAPTER_MEMEX_CORE_RANGE = "^0.7.1";
+const CROSS_ADAPTER_MEMEX_CORE_RESOLVED = "0.7.1";
+const APPLICATION_SHARP_OVERRIDE = "0.35.3";
 
 function readJson(relFromRepoRoot: string): Record<string, unknown> {
   // test/ts/<file> → repo root is two levels up.
@@ -84,6 +87,20 @@ describe("cross-adapter version-pin alignment (#4 / Tier 2)", () => {
       const coreRange = depRange(corePkg, "@huggingface/transformers");
       expect(coreRange, "@huggingface/transformers missing from memex-core pkg").toBeDefined();
       expect(depRange(hermesPkg, "@huggingface/transformers")).toBe(coreRange);
+    });
+
+    it("owns the Sharp security override at the accepted runtime version", () => {
+      const pnpm = hermesPkg.pnpm as { overrides?: Record<string, string> } | undefined;
+      expect(pnpm?.overrides?.sharp).toBe(APPLICATION_SHARP_OVERRIDE);
+
+      const transformersManifest = fileURLToPath(
+        new URL("../../node_modules/@huggingface/transformers/package.json", import.meta.url),
+      );
+      const sharpEntry = createRequire(transformersManifest).resolve("sharp");
+      const installed = JSON.parse(
+        readFileSync(join(dirname(sharpEntry), "..", "package.json"), "utf-8"),
+      ) as Record<string, unknown>;
+      expect(installed.version).toBe(APPLICATION_SHARP_OVERRIDE);
     });
   });
 });
