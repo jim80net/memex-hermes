@@ -12,13 +12,6 @@ const coreManifest = JSON.parse(
   readFileSync(join(repoRoot, "node_modules/@jim80net/memex-core/package.json"), "utf-8"),
 );
 
-const vectors = await new LocalEmbeddingProvider().embed(["Hermes required release gate"]);
-const vector = vectors[0];
-if (!Array.isArray(vector) || vector.length === 0 || !vector.every(Number.isFinite)) {
-  throw new Error("real embedding probe did not return a finite vector");
-}
-console.log(JSON.stringify({ gate: "real-embedding", ok: true, dimensions: vector.length }));
-
 const hostileRoot = mkdtempSync(join(tmpdir(), "memex-hermes-hostile-sharp-"));
 try {
   writeFileSync(
@@ -80,3 +73,32 @@ console.log(JSON.stringify({ gate: "hostile-graph", ok: true, message, newlyLoad
 } finally {
   rmSync(hostileRoot, { recursive: true, force: true });
 }
+
+const modelCache =
+  process.env.MEMEX_RELEASE_GATE_MODEL_CACHE ??
+  join(tmpdir(), "memex-hermes-release-gate-models");
+const retryDelaysMs = [5_000, 10_000, 20_000, 40_000, 60_000];
+let vectors;
+for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+  try {
+    vectors = await new LocalEmbeddingProvider(undefined, modelCache).embed([
+      "Hermes required release gate",
+    ]);
+    break;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const retryable = /(?:429|fetch|trying to load file)/i.test(message);
+    if (!retryable || attempt === retryDelaysMs.length) throw error;
+    const delayMs = retryDelaysMs[attempt];
+    console.warn(
+      `real embedding fetch attempt ${attempt + 1} failed; retrying in ${delayMs / 1000}s: ${message}`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+}
+
+const vector = vectors?.[0];
+if (!Array.isArray(vector) || vector.length === 0 || !vector.every(Number.isFinite)) {
+  throw new Error("real embedding probe did not return a finite vector");
+}
+console.log(JSON.stringify({ gate: "real-embedding", ok: true, dimensions: vector.length }));

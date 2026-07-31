@@ -31,8 +31,16 @@ jobs:
       - name: Audit production dependencies
         run: pnpm audit:prod
 
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: .cache/release-gate-models
+          key: memex-hermes-minilm-${{ runner.os }}-v1
+
       - name: Verify hostile graph and real embedding
         run: pnpm gate:runtime
+        env:
+          MEMEX_RELEASE_GATE_MODEL_CACHE: .cache/release-gate-models
 
       - name: Build wheel
         run: |
