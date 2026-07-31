@@ -22,6 +22,10 @@ jobs:
     needs: release-gate
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -31,6 +35,19 @@ jobs:
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pull requests created with GITHUB_TOKEN do not emit normal downstream
+      # workflow runs. Explicit workflow_dispatch is the documented exception,
+      # so run CI against the exact release-PR branch without another credential.
+      - name: Dispatch CI for the release PR
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+        run: |
+          branch="$(jq -r '.headBranchName // empty' <<< "$RELEASE_PR")"
+          test -n "$branch"
+          gh workflow run ci.yml --ref "$branch" --repo "$GITHUB_REPOSITORY"
 
   build:
     needs: [release-gate, release-please]

@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 # Cancel in-progress runs for the same ref when a new commit lands.
 concurrency:
@@ -13,7 +14,7 @@ concurrency:
 
 jobs:
   release-gate:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
     uses: ./.github/workflows/required-release-gate.yml
