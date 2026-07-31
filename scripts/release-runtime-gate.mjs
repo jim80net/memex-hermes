@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LocalEmbeddingProvider } from "@jim80net/memex-core";
+import { assertReleaseEmbeddingVector } from "./release-gate-contract.mjs";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const coreManifest = JSON.parse(
@@ -97,8 +98,5 @@ for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
   }
 }
 
-const vector = vectors?.[0];
-if (!Array.isArray(vector) || vector.length === 0 || !vector.every(Number.isFinite)) {
-  throw new Error("real embedding probe did not return a finite vector");
-}
+const vector = assertReleaseEmbeddingVector(vectors?.[0]);
 console.log(JSON.stringify({ gate: "real-embedding", ok: true, dimensions: vector.length }));
