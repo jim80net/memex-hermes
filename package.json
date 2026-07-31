@@ -16,6 +16,7 @@
     "lint": "biome check src/ test/ts/",
     "lint:fix": "biome check --write src/ test/ts/",
     "audit:prod": "pnpm audit --prod",
+    "gate:runtime": "node scripts/release-runtime-gate.mjs",
     "check": "pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {

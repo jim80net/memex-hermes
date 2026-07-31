@@ -12,6 +12,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release-gate:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/required-release-gate.yml
+
   typescript:
     name: TypeScript (pnpm + bun)
     runs-on: ubuntu-latest
@@ -30,9 +36,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Audit production dependencies
-        run: pnpm audit:prod
 
       - name: Type check
         run: pnpm typecheck
@@ -126,54 +129,3 @@ jobs:
             echo "test/e2e/ not yet present; running pytest with MEMEX_E2E=1 as a smoke gate"
             pytest test/python -q
           fi
-
-  wheel-builds:
-    name: Wheel build (sanity check)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: pyproject.toml
-
-      - name: Install build
-        run: python -m pip install build
-
-      - name: Build wheel
-        run: python -m build --wheel --outdir dist-wheel
-
-      - name: Verify wheel contents
-        run: |
-          set -e
-          WHEEL=$(ls dist-wheel/*.whl | head -n 1)
-          echo "Inspecting $WHEEL"
-          unzip -l "$WHEEL"
-          # R1 from hermes-plugin-packaging: the materialize script
-          # must be packaged; bin/ + plugin.yaml must ship for the
-          # install path; the discovery heuristic literals must
-          # survive packaging.
-          unzip -l "$WHEEL" | grep -q "memex_hermes/install.py"
-          unzip -l "$WHEEL" | grep -q "memex_hermes/bin/memex"
-          unzip -l "$WHEEL" | grep -q "memex_hermes/bin/install.sh"
-          unzip -l "$WHEEL" | grep -q "memex_hermes/plugin.yaml"
-          unzip -l "$WHEEL" | grep -q "memex_hermes/checksums.txt"
-
-      - name: Verify clean wheel install
-        run: |
-          set -e
-          WHEEL=$(ls dist-wheel/*.whl | head -n 1)
-          ACCEPT_ROOT=$(mktemp -d)
-          python -m venv "$ACCEPT_ROOT/venv"
-          "$ACCEPT_ROOT/venv/bin/pip" install "$WHEEL"
-          "$ACCEPT_ROOT/venv/bin/memex-hermes-install" \
-            --hermes-home "$ACCEPT_ROOT/hermes" \
-            --dry-run
-
-      - name: Upload wheel artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: memex-hermes-wheel
-          path: dist-wheel/*.whl

@@ -13,7 +13,13 @@ permissions:
   # third-party actions and dependency installs.
 
 jobs:
+  release-gate:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/required-release-gate.yml
+
   release-please:
+    needs: release-gate
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     outputs:
@@ -27,7 +33,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   build:
-    needs: release-please
+    needs: [release-gate, release-please]
     if: needs.release-please.outputs.release_created == 'true'
     strategy:
       matrix:
@@ -85,7 +91,7 @@ jobs:
           path: memex-hermes-${{ matrix.platform }}.*
 
   publish-binaries:
-    needs: [release-please, build]
+    needs: [release-gate, release-please, build]
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -108,7 +114,7 @@ jobs:
             --repo "${{ github.repository }}"
 
   publish-pypi:
-    needs: [release-please]
+    needs: [release-gate, release-please]
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     # OIDC trusted publishing — no PYPI_API_TOKEN secret required once
