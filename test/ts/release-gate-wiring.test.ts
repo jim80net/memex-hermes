@@ -28,17 +28,14 @@ describe("required release gate wiring", () => {
     );
   });
 
-  it("mechanically dispatches the required gate for bot-created release PRs", async () => {
-    const ci = await read(".github/workflows/ci.yml");
+  it("mechanically approves the held PR suite for bot-created release PRs", async () => {
     const release = await read(".github/workflows/release-please.yml");
 
-    expect(ci).toContain("workflow_dispatch:");
-    expect(ci).toMatch(
-      /release-gate:\n\s+if: github\.event_name == 'pull_request' \|\| github\.event_name == 'workflow_dispatch'/,
-    );
     expect(release).toMatch(/release-please:\n(?:\s+.*\n)*?\s+actions: write/);
     expect(release).toContain("if: steps.release.outputs.prs_created == 'true'");
-    expect(release).toContain('gh workflow run ci.yml --ref "$branch"');
+    expect(release).toContain("uses: actions/checkout@v4");
+    expect(release).toContain("node scripts/approve-release-pr-ci.mjs");
+    expect(release).not.toContain('gh workflow run ci.yml --ref "$branch"');
   });
 
   it("blocks release creation and publishing on the reusable gate", async () => {
