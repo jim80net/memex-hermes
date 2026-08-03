@@ -22,14 +22,14 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // --- Cross-adapter reference (KEEP IN LOCKSTEP WITH memex-claude + memex-core) -
-// Provenance: memex-claude/package.json + both pnpm-lock.yaml files, read
-// 2026-06-23 — all three repos resolve transformers 3.8.1 / memex-core 0.4.0.
-// When memex-claude bumps either, bump here in the same change.
+// Provenance: published @jim80net/memex-core@0.7.3 plus this repo's declaration,
+// lock, and installed graph, verified 2026-08-03. The shared transformers range
+// remains 3.8.1. When the ratified cross-adapter baseline moves, bump both here.
 const CROSS_ADAPTER_TRANSFORMERS_RANGE = "^3.8.1";
 const CROSS_ADAPTER_TRANSFORMERS_RESOLVED = "3.8.1";
-// Security-mitigated published-artifact baseline: memex-core@0.7.1.
-const CROSS_ADAPTER_MEMEX_CORE_RANGE = "^0.7.1";
-const CROSS_ADAPTER_MEMEX_CORE_RESOLVED = "0.7.1";
+// Published-artifact baseline: memex-core@0.7.3.
+const CROSS_ADAPTER_MEMEX_CORE_RANGE = "^0.7.3";
+const CROSS_ADAPTER_MEMEX_CORE_RESOLVED = "0.7.3";
 const APPLICATION_PROTOBUFJS_OVERRIDE = "7.6.5";
 const APPLICATION_SHARP_OVERRIDE = "0.35.3";
 const APPLICATION_TAR_OVERRIDE = "7.5.21";
