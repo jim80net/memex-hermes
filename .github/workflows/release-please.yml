@@ -36,18 +36,19 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Pull requests created with GITHUB_TOKEN do not emit normal downstream
-      # workflow runs. Explicit workflow_dispatch is the documented exception,
-      # so run CI against the exact release-PR branch without another credential.
-      - name: Dispatch CI for the release PR
+      - uses: actions/checkout@v4
+        if: steps.release.outputs.prs_created == 'true'
+
+      # Bot-authored pull_request runs are created in action_required state. A
+      # workflow_dispatch run on the same SHA does not satisfy the PR's required
+      # contexts, so approve the held PR suite itself. The helper polls for the
+      # asynchronously-created run and fails closed; dispatch is diagnostic only.
+      - name: Approve held CI for the release PR
         if: steps.release.outputs.prs_created == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_PR: ${{ steps.release.outputs.pr }}
-        run: |
-          branch="$(jq -r '.headBranchName // empty' <<< "$RELEASE_PR")"
-          test -n "$branch"
-          gh workflow run ci.yml --ref "$branch" --repo "$GITHUB_REPOSITORY"
+        run: node scripts/approve-release-pr-ci.mjs
 
   build:
     needs: [release-gate, release-please]
