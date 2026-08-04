@@ -41,8 +41,9 @@ jobs:
 
       # Bot-authored pull_request runs are created in action_required state. A
       # workflow_dispatch run on the same SHA does not satisfy the PR's required
-      # contexts, so approve the held PR suite itself. The helper polls for the
-      # asynchronously-created run and fails closed; dispatch is diagnostic only.
+      # contexts, so approve the held PR suite itself. The helper polls the exact
+      # head for up to five minutes, evaluates async run states client-side, and
+      # fails closed; dispatch remains diagnostic only.
       - name: Approve held CI for the release PR
         if: steps.release.outputs.prs_created == 'true'
         env:

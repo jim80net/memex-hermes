@@ -5,6 +5,8 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CI_WORKFLOW_PATH = ".github/workflows/ci.yml";
+export const DEFAULT_MAX_ATTEMPTS = 30;
+export const DEFAULT_POLL_INTERVAL_MS = 10_000;
 
 export async function approveReleasePrCi({
   releasePr,
@@ -14,7 +16,8 @@ export async function approveReleasePrCi({
   approveRun,
   dispatchCi,
   sleep,
-  maxAttempts = 12,
+  maxAttempts = DEFAULT_MAX_ATTEMPTS,
+  pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
 }) {
   const parsed = typeof releasePr === "string" ? JSON.parse(releasePr) : releasePr;
   const number = parsed?.number;
@@ -30,19 +33,38 @@ export async function approveReleasePrCi({
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const runs = await listRuns(repository, headSha);
-    const held = runs.find(
+    const exactPrRuns = runs.filter(
       (run) =>
         run?.event === "pull_request" &&
-        run?.status === "action_required" &&
         run?.head_sha === headSha &&
         run?.path === CI_WORKFLOW_PATH,
+    );
+    const held = exactPrRuns.find(
+      (run) => run?.status === "action_required" || run?.conclusion === "action_required",
     );
     if (held) {
       await approveRun(repository, held.id);
       return { approvedRunId: held.id, branch, headSha, number };
     }
 
-    if (attempt < maxAttempts) await sleep(5_000);
+    // GitHub can expose the exact PR run as requested/queued before its held
+    // action_required state becomes queryable. Keep polling client-side rather
+    // than asking the API to hide every not-yet-held state.
+    const preApproval = exactPrRuns.find((run) =>
+      ["requested", "queued", "waiting", "pending"].includes(run?.status),
+    );
+    if (!preApproval) {
+      // If another actor already approved the exact PR suite, our job is done;
+      // its own required contexts will independently decide pass/fail.
+      const alreadyUnheld = exactPrRuns.find((run) =>
+        ["in_progress", "completed"].includes(run?.status),
+      );
+      if (alreadyUnheld) {
+        return { observedRunId: alreadyUnheld.id, branch, headSha, number };
+      }
+    }
+
+    if (attempt < maxAttempts) await sleep(pollIntervalMs);
   }
 
   // Keep the old dispatch as observability/a diagnostic run, but fail this job:
@@ -74,8 +96,6 @@ export function createGhClient(exec = execFileSync) {
         "-f",
         `head_sha=${headSha}`,
         "-f",
-        "status=action_required",
-        "-f",
         "per_page=100",
       ]).workflow_runs ?? [],
     approveRun: async (repository, runId) => {
@@ -103,7 +123,9 @@ async function run() {
     sleep: (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)),
   });
   process.stdout.write(
-    `approved held CI run ${result.approvedRunId} for release PR #${result.number} at ${result.headSha}\n`,
+    result.approvedRunId
+      ? `approved held CI run ${result.approvedRunId} for release PR #${result.number} at ${result.headSha}\n`
+      : `release PR #${result.number} CI run ${result.observedRunId} was already unheld at ${result.headSha}\n`,
   );
 }
 
