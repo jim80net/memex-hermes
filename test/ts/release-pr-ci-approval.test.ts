@@ -34,7 +34,7 @@ describe("release PR CI approval", () => {
     expect(calls[0]).toEqual(["api", "repos/jim80net/memex-hermes/pulls/36"]);
     expect(calls[1]).toContain("event=pull_request");
     expect(calls[1]).toContain("head_sha=7020664");
-    expect(calls[1]).toContain("status=action_required");
+    expect(calls[1]).not.toContain("status=action_required");
     expect(calls[2]).toEqual([
       "api",
       "--method",
@@ -70,6 +70,66 @@ describe("release PR CI approval", () => {
 
     expect(parsed.calls).toEqual([["approve", 12]]);
     expect(parsed.result).toMatchObject({ approvedRunId: 12, headSha: "7020664" });
+  });
+
+  it("approves a run that materializes after the former 12-poll window", () => {
+    const output = runProbe(`
+      import { approveReleasePrCi, DEFAULT_MAX_ATTEMPTS, DEFAULT_POLL_INTERVAL_MS } from ${JSON.stringify(helperUrl)};
+      const calls = [];
+      let polls = 0;
+      const result = await approveReleasePrCi({
+        releasePr: { number: 36, headBranchName: "release-please--branches--main" },
+        repository: "jim80net/memex-hermes",
+        getHeadSha: async () => "f00c841d",
+        listRuns: async () => {
+          polls += 1;
+          if (polls <= 12) return [];
+          return [{ id: 30844894397, event: "pull_request", status: "action_required", head_sha: "f00c841d", path: ".github/workflows/ci.yml" }];
+        },
+        approveRun: async (_repository, id) => calls.push(["approve", id]),
+        dispatchCi: async () => calls.push(["dispatch"]),
+        sleep: async (ms) => calls.push(["sleep", ms]),
+      });
+      console.log(JSON.stringify({ calls, defaults: [DEFAULT_MAX_ATTEMPTS, DEFAULT_POLL_INTERVAL_MS], polls, result }));
+    `);
+    const parsed = JSON.parse(output) as {
+      calls: Array<[string, number?]>;
+      defaults: [number, number];
+      polls: number;
+      result: { approvedRunId: number };
+    };
+
+    expect(parsed.defaults).toEqual([30, 10_000]);
+    expect(parsed.polls).toBe(13);
+    expect(parsed.calls.filter(([kind]) => kind === "sleep")).toHaveLength(12);
+    expect(parsed.calls.at(-1)).toEqual(["approve", 30844894397]);
+    expect(parsed.calls.some(([kind]) => kind === "dispatch")).toBe(false);
+    expect(parsed.result.approvedRunId).toBe(30844894397);
+  });
+
+  it("accepts an exact PR suite that another actor already unheld", () => {
+    const output = runProbe(`
+      import { approveReleasePrCi } from ${JSON.stringify(helperUrl)};
+      const calls = [];
+      const result = await approveReleasePrCi({
+        releasePr: { number: 36, headBranchName: "release-please--branches--main" },
+        repository: "jim80net/memex-hermes",
+        getHeadSha: async () => "f00c841d",
+        listRuns: async () => [{ id: 30844894397, event: "pull_request", status: "in_progress", head_sha: "f00c841d", path: ".github/workflows/ci.yml" }],
+        approveRun: async (_repository, id) => calls.push(["approve", id]),
+        dispatchCi: async () => calls.push(["dispatch"]),
+        sleep: async () => calls.push(["sleep"]),
+        maxAttempts: 1,
+      });
+      console.log(JSON.stringify({ calls, result }));
+    `);
+    const parsed = JSON.parse(output) as {
+      calls: Array<[string, number?]>;
+      result: { observedRunId: number };
+    };
+
+    expect(parsed.calls).toEqual([]);
+    expect(parsed.result.observedRunId).toBe(30844894397);
   });
 
   it("fails after diagnostic dispatch when no held PR suite exists", () => {
