@@ -1,6 +1,6 @@
 {
   "name": "memex-hermes-engine",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript engine extensions for memex-hermes: Hermes.* hook_event_name dispatch handlers compiled into the memex-hermes binary (own GitHub release). Built via `bun build --compile` against @jim80net/memex-core as a library dependency. Not published to npm.",
   "private": true,
   "license": "MIT",
