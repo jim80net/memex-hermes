@@ -48,12 +48,12 @@ load-bearing fields for memex:
 {
   "bundle_version": 1,
   "flotilla_agent": "grok-research",   // REQUIRED — desk binding (namespaced; not "agent")
-  "project_root": "/home/operator/work/project",
+  "project_root": "<project_root>",
   "from": { "surface": "claude-code", ... },
   "to":   { "surface": "grok", ... },
   "switch_token": "20260629T031400.000000001-a3f91b2c",
   "handoff_path": "/.../.flotilla/handoffs/switch-….md",   // the portable chapter snapshot
-  "workspace_state_path": "/home/operator/.flotilla/grok-research/state.md",
+  "workspace_state_path": "~/.flotilla/grok-research/state.md",
   "hint_version": 1,                    // TOP-LEVEL (read before parsing the hint)
   "memex_injection_hint": "takeover-cross-harness"          // bare STRING (or optional {mode,queries[],pin_entries[]})
 }
