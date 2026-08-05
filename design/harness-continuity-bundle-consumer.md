@@ -29,10 +29,11 @@ flotilla-dev in parallel.
 
 A desk switched between harnesses (Claude Code ↔ Grok ↔ Codex ↔ OpenClaude)
 keeps its operating context: the operator's **code-style preferences** and
-**workflow constraints** travel with it. The constraints already live in the
-shared memex corpus and every adapter reads them through the same memex-core
-parser (#4 proved byte-compat; #6 made `memex_remember` actually propagate). This
-design is the **takeover handshake**: flotilla writes a `HarnessContinuityBundle`
+**workflow constraints** travel with it. Once #20's audience-gated ingest lands,
+the constraints will live in the shared memex corpus, where every adapter reads
+them through the same memex-core parser (#4 proved byte-compat; #6 made
+`memex_remember` actually propagate). This design is the **takeover handshake**:
+flotilla writes a `HarnessContinuityBundle`
 at switch time; memex consumes it at takeover and surfaces the right corpus
 context into the new harness.
 
