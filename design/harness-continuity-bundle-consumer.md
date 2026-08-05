@@ -108,7 +108,6 @@ form, back-compatibly.** A consumer treats a bare string as `{mode: <string>}`.
 
 ```jsonc
 "memex_injection_hint": {
-  "hint_version": 1,
   "mode": "takeover-cross-harness",        // the existing label; the discriminator
   "queries": [                              // OPTIONAL — prefetch seeds INTO the corpus
     "operator code-style and review-workflow standards"
@@ -169,23 +168,27 @@ loop) and a **topical channel** (a one-shot rehydration from the handoff).
    within the project boundary; cap the total injected size; the handoff-derived
    query (step 4) is untrusted text used for retrieval only.
 3. **Resolve scope** from `memex_injection_hint.scope` else `project_root`
-   (`resolveHermesProjectId`-style). **Pin entries:** resolve each `pin_entries`
-   name from the corpus by exact name. **Stage** the pins + the resolved queries
-   into a disk payload keyed by `session_id` + `switch_token`, under
-   `withFileLock` (cross-process — every event is a fresh process; reuse the
-   `init.ts:41-45` lock idiom; the same `savePrefetchInjections` disk-handoff
-   pattern `prefetch.ts` already uses).
+   (`resolveHermesProjectId`-style). **Pin entries:** validate each `pin_entries`
+   name by exact corpus lookup, then persist the names in the session's normal
+   rule-selection state, separate from the consume-once payload. **Stage** only
+   the resolved topical queries in a disk payload keyed by `session_id` +
+   `switch_token`, under `withFileLock` (cross-process — every event is a fresh
+   process; reuse the `init.ts:41-45` lock idiom; the same
+   `savePrefetchInjections` disk-handoff pattern `prefetch.ts` already uses).
 
-**At the first `Hermes.prefetch` of that session (inject, consume-once):**
+**At the first `Hermes.prefetch` of that session (topical rehydration,
+consume-once):**
 4. Under `withFileLock`, read the staged payload for this `session_id`; if its
-   `switch_token` is unconsumed, prepend a **continuity block** (pinned standing
-   constraints + a bounded topical rehydration) to `additionalContext`, then
-   record the consumed token. A bounded query (default: the hint `mode`'s
-   built-in default query, or a capped salient-line extract from the handoff —
-   never the whole markdown) seeds the topical retrieval.
-5. **Recurrence:** the pinned standing constraints ride the normal rule-reminder
-   loop for the rest of the session (full once, reminder after) — that is what
-   makes the constraints *keep* applying, not just greet.
+   `switch_token` is unconsumed, prepend a **continuity block** containing a
+   bounded topical rehydration to `additionalContext`, then record the consumed
+   token. A bounded query (default: the hint `mode`'s built-in default query, or
+   a capped salient-line extract from the handoff — never the whole markdown)
+   seeds the topical retrieval.
+5. **Recurrence:** consume-once applies only to the one-shot topical
+   rehydration. On every prompt, the normal memex-core rule loop re-resolves the
+   pinned standing constraints from the corpus (full body once, then a one-line
+   reminder). Their recurrence is independent of the staged payload and the
+   consumed token.
 
 6. **Fallback (no/foreign/malformed bundle):** behave exactly as today — the
    static system-prompt block + normal per-prompt prefetch. Zero regression for a
